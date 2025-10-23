@@ -93,3 +93,4 @@ app.*.map.json
 
 
 *.lock
+manifest*.json

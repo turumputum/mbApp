@@ -80,14 +80,28 @@ class _HomePageState extends State<HomePage> {
   Map<String, List<String>> _availableKeys = {};
   Map<String, String> _chapterDescriptions = {};
   Map<String, String> _chapterWildcards = {}; // Maps wildcard patterns to actual chapter names
-  final List<String> _removableRoots = <String>[
-    // Linux common mount roots
-    '/media',
-    '/mnt',
-    // macOS
-    '/Volumes',
-    // Windows (handled via drive letters later if ever needed)
-  ];
+  List<String> get _removableRoots {
+    if (Platform.isWindows) {
+      // Windows: Check all available drive letters
+      return <String>[
+        'D:\\',
+        'E:\\',
+        'F:\\',
+        'G:\\',
+        'H:\\',
+        'I:\\',
+        'J:\\',
+        'K:\\',
+      ];
+    } else {
+      // Linux and macOS
+      return <String>[
+        '/media',
+        '/mnt',
+        '/Volumes',
+      ];
+    }
+  }
 
   void _log(String message) {
     final String time = DateTime.now().toIso8601String().substring(11, 19);
@@ -1998,12 +2012,25 @@ class _HomePageState extends State<HomePage> {
         }
       } catch (_) {}
     }
-    // Additionally check common direct paths
-    final List<String> commonCandidates = <String>[
-      '/media/$fileName',
-      '/mnt/$fileName',
-      '/Volumes/$fileName',
-    ];
+    
+    // Additionally check common direct paths based on platform
+    final List<String> commonCandidates = <String>[];
+    
+    if (Platform.isWindows) {
+      // Windows: Check common removable drive locations
+      for (int i = 0; i < 26; i++) {
+        final String driveLetter = String.fromCharCode(65 + i); // A-Z
+        commonCandidates.add('$driveLetter:\\$fileName');
+      }
+    } else {
+      // Linux and macOS
+      commonCandidates.addAll([
+        '/media/$fileName',
+        '/mnt/$fileName',
+        '/Volumes/$fileName',
+      ]);
+    }
+    
     for (final String c in commonCandidates) {
       final File f = File(c);
       if (await f.exists()) {
@@ -2016,17 +2043,18 @@ class _HomePageState extends State<HomePage> {
   Future<String?> _findManifestFileInDir(Directory dir, {int maxDepth = 4}) async {
     if (maxDepth < 0) return null;
     try {
+	_log("Searching in $dir");
       await for (final FileSystemEntity entity in dir.list(followLinks: false)) {
         final String path = entity.path;
         if (entity is File) {
-          final String fileName = path.split('/').last.toLowerCase();
+          final String fileName = path.split(Platform.pathSeparator).last.toLowerCase();
           // Match manifest-*.json pattern
           if (fileName.startsWith('manifest-') && fileName.endsWith('.json')) {
             return path;
           }
         } else if (entity is Directory) {
           // Skip hidden/system directories to reduce noise
-          final String name = path.split('/').last;
+          final String name = path.split(Platform.pathSeparator).last;
           if (name.startsWith('.')) continue;
           final String? nested = await _findManifestFileInDir(entity, maxDepth: maxDepth - 1);
           if (nested != null) return nested;
@@ -2042,12 +2070,12 @@ class _HomePageState extends State<HomePage> {
       await for (final FileSystemEntity entity in dir.list(followLinks: false)) {
         final String path = entity.path;
         if (entity is File) {
-          if (path.split('/').last.toLowerCase() == fileName.toLowerCase()) {
+          if (path.split(Platform.pathSeparator).last.toLowerCase() == fileName.toLowerCase()) {
             return path;
           }
         } else if (entity is Directory) {
           // Skip hidden/system directories to reduce noise
-          final String name = path.split('/').last;
+          final String name = path.split(Platform.pathSeparator).last;
           if (name.startsWith('.')) continue;
           final String? nested = await _findFileInDir(entity, fileName, maxDepth: maxDepth - 1);
           if (nested != null) return nested;
