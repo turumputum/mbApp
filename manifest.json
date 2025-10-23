@@ -1,0 +1,5787 @@
+{ "config" : [
+        { "chapter" : "SYSTEM",
+          "values" : [
+                    { "key" : "deviceName",
+                      "default": "moduleBox" },
+                    { "key" : "statusPeriod",
+                      "default" : "900" },
+                    { "key" : "statusAllChannels",
+                      "enum" : [ "false", "true" ]  },
+                    { "key" : "loglevel",
+                      "enum" : [ "none", "error", "warn", "info", "debug", "verbose" ]  }
+                ]
+        },
+        { "chapter" : "LAN",
+          "values" : [
+                    { "key" : "LAN_enable",
+                      "enum" : [ "false", "true" ]  },
+                    { "key" : "DHCP",
+                      "enum" : [ "false", "true" ]  },
+                    { "key" : "ipAdress",
+                      "default" : "192.168.1.100" },
+                    { "key" : "netMask",
+                      "default" : "255.255.255.0" },
+                    { "key" : "gateWay",
+                      "default" : "192.168.1.1" }
+                ]
+        },
+        { "chapter" : "UDP",
+          "values" : [
+                    { "key" : "udpServerAdress",
+                      "default" : "192.168.1.55" },
+                    { "key" : "udpServerPort",
+                      "default" : "9000" },
+                    { "key" : "udpMyPort",
+                      "default" : "9000" }
+                ]
+        },
+        { "chapter" : "MQTT",
+          "values" : [
+                    { "key" : "mqttBrokerAdress",
+                      "default" : "192.168.1.55" }
+                ]
+        },
+        { "chapter" : "SLOT_*",
+          "values" : [
+                    { "key" : "mode",
+                      "spec" : "slot_mode" },
+                    { "key" : "options",
+                      "spec" : "slot_options" },
+                    { "key" : "cross_link",
+                      "spec" : "slot_crosslink" }
+                ]
+        }
+],
+"modes" : [
+        {
+                "mode": "empty",
+                "description": "Пустой слот",
+                "options": []
+        },
+        {
+                "mode": "SD_card",
+                "description": "Карта SD",
+                "options": []
+        },
+
+	{
+		"mode": "audioPlayer",
+		"description": "\n    Звуковой Модуль\n",
+		"options": [
+			{
+				"name": "volume",
+				"description": "Уровень громкости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 70,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "speed",
+				"description": "Скорость воспроизведения\n\t",
+				"valueType": "float",
+				"valueDefault": 1.09,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "tone",
+				"description": "Сдвиг тональности\n\t",
+				"valueType": "float",
+				"valueDefault": 1,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "eqLow",
+				"description": "Нижняя граница эквалайзера\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": -13,
+				"valueMax": 0,
+				"valueMin": -20
+			},
+			{
+				"name": "eqMid",
+				"description": "Средняя граница эквалайзера\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": -13,
+				"valueMax": 0,
+				"valueMin": -20
+			},
+			{
+				"name": "eqHigh",
+				"description": "Верхняя граница эквалайзера\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": -13,
+				"valueMax": 0,
+				"valueMin": -20
+			},
+			{
+				"name": "attenuation",
+				"description": "Использовать затухание\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "playDelay",
+				"description": "Пауза перед проигрыванием\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 0
+			},
+			{
+				"name": "playToEnd",
+				"description": "Проигрывать до конца\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "topic",
+				"description": "Проигрывать до конца\n\t",
+				"valueType": "string",
+				"valueDefault": "/player_0"
+			}
+		],
+		"reports": [
+			{
+				"description": "Рапортует номер трека при завершении\n\t",
+				"valueType": "string",
+				"unit": "",
+				"topic": "endOfTrack"
+			}
+		],
+		"commands": [
+			{
+				"command": "play",
+				"description": "Проиграть трек\n       Опционально - номер трека\n",
+				"parametersType": "types",
+				"parameters": [ "string " ]
+			},
+			{
+				"command": "stop",
+				"description": "Остановить проигрывание\n       \n",
+				"parametersType": "types",
+				"parameters": [ " " ]
+			},
+			{
+				"command": "shift",
+				"description": "Переключить трек\n       \n",
+				"parametersType": "types",
+				"parameters": [ "string " ]
+			},
+			{
+				"command": "setVolume",
+				"description": "Установить громкость\n       \n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			}
+		]
+	},
+
+	{
+		"mode": "pwmRGB",
+		"description": "\n    Модуль управляет RGB-лентой\n",
+		"options": [
+			{
+				"name": "increment",
+				"description": "Величина приращения значения свечения\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "inverse",
+				"description": "Инверсия значений\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальная яркость\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальная яркость\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 40,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "RGBcolor",
+				"description": "Начальный цвет\n",
+				"valueType": "color",
+				"valueDefault": "0 0 255"
+			},
+			{
+				"name": "ledMode",
+				"description": "Задаёт режим анимации",
+				"valueType": "enum",
+				"values": [ "default", "flash", "glitch", "swiper", "rainbow", "run" ]
+			},
+			{
+				"name": "defaultState",
+				"description": "Состояние по умолчанию\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/pwmRGB_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "NULL",
+				"description": "Числовое значение.\n       задаёт текущее состояние светодиода (вкл/выкл)\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setRGB",
+				"description": "Установить новый целевой цвет. \n       Цвет задаётся десятичными значениями R G B через пробел\n",
+				"parametersType": "types",
+				"parameters": [ "int ", "int ", "int " ]
+			},
+			{
+				"command": "setMode",
+				"description": "Установить новый режим анимации цветов\n",
+				"parametersType": "enum",
+				"parameters": [ "default", "flash", "glitch", "swiper", "rainbow", "run" ]
+			},
+			{
+				"command": "setIncrement",
+				"description": "Установить новое значение приращения\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setMaxBright",
+				"description": "Установить максимальное значение яркости\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setMinBright",
+				"description": "Установить минимальное значение яркости\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			}
+		]
+	},
+
+	{
+		"mode": "adc1",
+		"description": "\n    Модуль реализует поддержку первого ADC\n",
+		"options": [
+			{
+				"name": "floatOutput",
+				"description": "Флаг определяет формат воводящего значения, \n\t\tесли указан - будет выводиться значение с плавающей точкой,\n\t\tиначе - целочисленное\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "maxVal",
+				"description": "Определяет верхний порог значений",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 4095,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "minVal",
+				"description": "Определяет нижний порог значений",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "inverse",
+				"description": "Флаг задаёт инвертирование значений",
+				"valueType": "flag"
+			},
+			{
+				"name": "filterK",
+				"description": "Коэфициент фильтрации",
+				"valueType": "float",
+				"valueDefault": 1,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "deadBand",
+				"description": "Фильтрация дребезга - определяет порог срабатывания",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4095,
+				"valueMin": 1
+			},
+			{
+				"name": "periodic",
+				"description": "Задаёт периодичночть отсчётов в миллисекундах",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/adc_0"
+			},
+			{
+				"name": "dividerMode",
+				"description": "Задаёт режим делителя",
+				"valueType": "enum",
+				"values": [ "5V", "3V3", "10V" ]
+			}
+		],
+		"reports": [
+			{
+				"description": "Возвращает текущее значение канала ввиде числа с плавающей точкой, выражающее отношение к заданной шкале\n\t",
+				"valueType": "ratio",
+				"unit": "unit",
+				"topic": ""
+			},
+			{
+				"description": "Возвращает текущее сырое целочисленное значение канала\n\t",
+				"valueType": "int",
+				"unit": "unit",
+				"topic": ""
+			}
+		],
+		"commands": [
+		]
+	},
+
+	{
+		"mode": "analog",
+		"description": "\n    Старая версия поддержки ADC\n",
+		"options": [
+			{
+				"name": "floatOutput",
+				"description": "Флаг определяет формат воводящего значения, \n          если указан - будет выводиться значение с плавающей точкой,\n          иначе - целочисленное\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "maxVal",
+				"description": "Определяет верхний порог значений",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "minVal",
+				"description": "Определяет нижний порог значений",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "inverse",
+				"description": "Флаг задаёт инвертирование значений",
+				"valueType": "flag"
+			},
+			{
+				"name": "filterK",
+				"description": "Коэфициент фильтрации",
+				"valueType": "float",
+				"valueDefault": 1,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "deadBand",
+				"description": "Фильтрация дребезга - определяет порог срабатывания",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "periodic",
+				"description": "Задаёт периодичночть отсчётов в миллисекундах",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/adc_0"
+			},
+			{
+				"name": "dividerMode",
+				"description": "Задаёт режим делителя",
+				"valueType": "enum",
+				"values": [ "5V", "3V3", "10V" ]
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+		]
+	},
+
+	{
+		"mode": "button_led",
+		"description": "\n    Модуль светодиодной кнопки\n",
+		"options": [
+			{
+				"name": "buttonInverse",
+				"description": "Флаг определяет инверсию кнопки\n\t\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "buttonDebounceGap",
+				"description": "Глубина фильтра дребезга\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "longPressTime",
+				"description": "Продолжительность длинного нажатия\n\t\t   Ненулевое значение этого параметра меняет логику обработки кнопки: ввиду того, что для определения \n\t\t   времени нажатия необходимо ожидать отпускание кнопки, информаци о её нажатии будет оправлена \n\t\t   только в момент её отпускания. Если не будет достигнута продолжительность длинного нажатия.\n\t\t",
+				"valueType": "int",
+				"unit": "ms",
+				"valueDefault": 0,
+				"valueMax": 65535,
+				"valueMin": 0
+			},
+			{
+				"name": "doubleClickTime",
+				"description": "Длительность промежутка между нажатиями для регистрации двойного нажатия\n\t\t",
+				"valueType": "int",
+				"unit": "ms",
+				"valueDefault": 0,
+				"valueMax": 65535,
+				"valueMin": 0
+			},
+			{
+				"name": "eventfilter",
+				"description": "Флаг задаёт фильтрацию совытий при активных\n\t\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "buttonTopic",
+				"description": "Топик для событий кнопки\n\t\t\t",
+				"valueType": "string",
+				"valueDefault": "/button_0"
+			},
+			{
+				"name": "ledInverse",
+				"description": "Флаг определяет инверсию светодиода\n\t\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "increment",
+				"description": "Интенсивность затухание свечения\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальное свечение\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальное свечение\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 40,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "ledMode",
+				"description": "Задаёт режим анимации",
+				"valueType": "enum",
+				"values": [ "none", "flash", "glitch" ]
+			},
+			{
+				"name": "ledTopic",
+				"description": "Топик для режима свечения\n\t\t\t",
+				"valueType": "string",
+				"valueDefault": "/led_0"
+			}
+		],
+		"reports": [
+			{
+				"description": "Возвращает состояние нажатия кнопки\n\t",
+				"valueType": "int",
+				"unit": "unit",
+				"topic": "nil"
+			},
+			{
+				"description": "Возвращает состояние длинного нажатия кнопки\n\t",
+				"valueType": "int",
+				"unit": "unit",
+				"topic": "longpress"
+			},
+			{
+				"description": "Возвращает состояние двойного нажатия кнопки\n\t",
+				"valueType": "int",
+				"unit": "unit",
+				"topic": "doubleClick"
+			}
+		],
+		"commands": [
+			{
+				"command": "NULL",
+				"description": "Числовое значение.\n       задаёт текущее состояние светодиода (вкл/выкл)\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			}
+		]
+	},
+
+	{
+		"mode": "encoderPPM",
+		"description": "\n\tМодуль энкодера с фазово импульсной модуляцией(PPM)\n",
+		"options": [
+			{
+				"name": "absolute",
+				"description": "Флаг определяет абслютный режим работы энкодера, \n\t\t\tиначе - инкрементальный\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "floatOutput",
+				"description": "Флаг определяет значение с плавающей точкой,\n\t\t   иначе - целочисленное\n\t\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "dirInverse",
+				"description": "Флаг задаёт инверсию направления",
+				"valueType": "flag"
+			},
+			{
+				"name": "zeroShift",
+				"description": "Значение смещения нуля\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "calibration",
+				"description": "Флаг задаёт необходимость калибровки",
+				"valueType": "flag"
+			},
+			{
+				"name": "filterK",
+				"description": "Флаг задаёт необходимость калибровки",
+				"valueType": "float",
+				"valueDefault": 1,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "deadZone",
+				"description": "Флаг задаёт необходимость калибровки",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "offset",
+				"description": "Флаг задаёт необходимость калибровки",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "pwmMinVal",
+				"description": "Минимальное значение",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "pwmMaxVal",
+				"description": "Максимальное значение",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "refreshRate",
+				"description": "Максимальное значение",
+				"valueType": "int",
+				"unit": "fps",
+				"valueDefault": 20,
+				"valueMax": 100,
+				"valueMin": 1
+			},
+			{
+				"name": "numOfPos",
+				"description": "Количество положений\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/encoder_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+		]
+	},
+	{
+		"mode": "encoderInc",
+		"description": "\n\tМодуль для работы с инкрементальными энкодерами, обычно оптический.\n",
+		"options": [
+			{
+				"name": "absolute",
+				"description": "Флаг определяет абслютный режим работы энкодера, \n\t\tПо умолчанию  - инкрементальный\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "floatOutput",
+				"description": "Флаг настраивает выходные значения в виде числа с плавающей точкой от 0.0 до 1.0 \n\t\tпо умолчания - целочисленное\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "dirInverse",
+				"description": "Флаг задаёт инверсию направления",
+				"valueType": "flag"
+			},
+			{
+				"name": "linearCounter",
+				"description": "Флаг, режим работы энкода в виде линейного счетчика при достижении максимального и минимальных значений счет будет остановлен, \n\t\tПо умолчанию - счетчик работает в зациклен, и при достижении минимального значения переходит с камсимальному и на оборот\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "glitchFilter",
+				"description": "Значение аппаратного фильтра\n\t\t- еденицы измерения наносекунды\n\t",
+				"valueType": "int",
+				"unit": "ns",
+				"valueDefault": 800,
+				"valueMax": 4095,
+				"valueMin": 1
+			},
+			{
+				"name": "zeroShift",
+				"description": "Значение смещения нуля после делителя\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "minVal",
+				"description": "Минимальное значение",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "maxVal",
+				"description": "Максимальное значение\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 4096,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период проверки значений\n\t\t- еденицы измерения раз в секунду\n\t",
+				"valueType": "int",
+				"unit": "fps",
+				"valueDefault": 20,
+				"valueMax": 100,
+				"valueMin": 1
+			},
+			{
+				"name": "divider",
+				"description": "Делитель",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 4,
+				"valueMax": 0,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/encoder_0"
+			}
+		],
+		"reports": [
+			{
+				"description": "Рапортует текущее значение\n\t",
+				"valueType": "string",
+				"unit": "",
+				"topic": ""
+			}
+		],
+		"commands": [
+			{
+				"command": "reset",
+				"description": "Обнуляет счетчик\n",
+				"parametersType": "types",
+				"parameters": [ " " ]
+			}
+		]
+	},
+	{
+		"mode": "encoderAS5600",
+		"description": "\n\tМодуль для работы с инкрементальными энкодерами, обычно оптический.\n",
+		"options": [
+			{
+				"name": "absolute",
+				"description": "Флаг определяет абслютный режим работы энкодера, \n\t\tПо умолчанию  - инкрементальный\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "floatOutput",
+				"description": "Флаг натраивает выходные значения в виде числа с плавающей точкой,\n\t\tиначе - целочисленное\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "dirInverse",
+				"description": "Флаг задаёт инверсию направления",
+				"valueType": "flag"
+			},
+			{
+				"name": "deadZone",
+				"description": "Значение зоны не чуствительности\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "zeroShift",
+				"description": "Значение смещения нуля после делителя\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "filterK",
+				"description": "Значение смещения нуля после делителя\n\t",
+				"valueType": "float",
+				"valueDefault": 1,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "minVal",
+				"description": "Минимальное значение",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "maxVal",
+				"description": "Максимальное значение\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 4096,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период проверки значений\n\t\t- еденицы измерения раз в секунду\n\t",
+				"valueType": "int",
+				"unit": "fps",
+				"valueDefault": 20,
+				"valueMax": 100,
+				"valueMin": 1
+			},
+			{
+				"name": "divider",
+				"description": "Делитель",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 4,
+				"valueMax": 0,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/encoder_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+		]
+	},
+
+	{
+		"mode": "button_smartLed",
+		"description": "\n    Модуль поддержки Smart-LED\n",
+		"options": [
+			{
+				"name": "numOfLed",
+				"description": "Количенство светодиодов\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 24,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "ledInverse",
+				"description": "Флаг задаёт инвертирование значений \n",
+				"valueType": "flag"
+			},
+			{
+				"name": "defaultState",
+				"description": "Состояние по умолчанию\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 1,
+				"valueMin": 0
+			},
+			{
+				"name": "increment",
+				"description": "Величина приращения\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления \n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 1000,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "RGBcolor",
+				"description": "Начальный цвет\n",
+				"valueType": "color",
+				"valueDefault": "0 0 255"
+			},
+			{
+				"name": "ledMode",
+				"description": "Задаёт режим анимации",
+				"valueType": "enum",
+				"values": [ "default", "flash", "glitch", "swiper", "rainbow", "run" ]
+			},
+			{
+				"name": "ledTopic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/smartLed_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "NULL",
+				"description": "Числовое значение.\n       задаёт текущее состояние светодиода (вкл/выкл)\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setRGB",
+				"description": "Установить новый целевой цвет. \n       Цвет задаётся десятичными значениями R G B через пробел\n",
+				"parametersType": "types",
+				"parameters": [ "int ", "int ", "int " ]
+			},
+			{
+				"command": "setMode",
+				"description": "Установить новый режим анимации цветов\n",
+				"parametersType": "enum",
+				"parameters": [ "default", "flash", "glitch", "swiper", "rainbow", "run" ]
+			},
+			{
+				"command": "setIncrement",
+				"description": "Установить новое значение приращения\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			}
+		]
+	},
+	{
+		"mode": "button_swiperLed",
+		"description": "\n   Модуль поддержки SWIPER LED\n",
+		"options": [
+			{
+				"name": "numOfLed",
+				"description": "Количенство светодиодов\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 16,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления \n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 25,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "RGBcolor",
+				"description": "Начальный цвет\n",
+				"valueType": "color",
+				"valueDefault": "0 0 255"
+			},
+			{
+				"name": "ledTopic",
+				"description": "Начальный цвет\n",
+				"valueType": "string",
+				"valueDefault": "/swiperLed_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "swipe",
+				"description": "Анимация эфекта\n",
+				"parametersType": "enum",
+				"parameters": [ "up", "down", "left", "right" ]
+			}
+		]
+	},
+	{
+		"mode": "button_ledRing",
+		"description": "\n    Модуль поддержки светового кольца\n",
+		"options": [
+			{
+				"name": "numOfLed",
+				"description": "Количенство светодиодов\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 24,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "increment",
+				"description": "Величина приращения\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления \n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 30,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "numOfPos",
+				"description": "Количество позиций\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "effectLen",
+				"description": "Длинна эффекта\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "defaultState",
+				"description": "Состояние по умолчанию\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 1,
+				"valueMin": 0
+			},
+			{
+				"name": "dirInverse",
+				"description": "Инверсия направления эффекта\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "offset",
+				"description": "Смещение эффекта\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "ledMode",
+				"description": "Задаёт режим анимации",
+				"valueType": "enum",
+				"values": [ "default", "flash", "glitch", "swiper", "rainbow", "run" ]
+			},
+			{
+				"name": "RGBcolor",
+				"description": "Начальный цвет\n",
+				"valueType": "color",
+				"valueDefault": "0 0 255"
+			},
+			{
+				"name": "ledTopic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/ledRing_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "NULL",
+				"description": "Числовое значение.\n       задаёт текущее состояние светодиода (вкл/выкл)\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setRGB",
+				"description": "Установить новый целевой цвет. \n       Цвет задаётся десятичными значениями R G B через пробел\n",
+				"parametersType": "types",
+				"parameters": [ "int ", "int ", "int " ]
+			},
+			{
+				"command": "setPos",
+				"description": "Установить новую текущую позичию\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setPos",
+				"description": "Установить новую текущую позичию\n",
+				"parametersType": "types",
+				"parameters": [ "string " ]
+			}
+		]
+	},
+	{
+		"mode": "button_ledBar",
+		"description": "\n    Модуль поддержки светового блока\n",
+		"options": [
+			{
+				"name": "numOfLed",
+				"description": "Количенство светодиодов\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 24,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "increment",
+				"description": "Величина приращения\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления \n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 1000,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "numOfPos",
+				"description": "Количество позиций\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "defaultState",
+				"description": "Состояние по умолчанию\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 1,
+				"valueMin": 0
+			},
+			{
+				"name": "dirInverse",
+				"description": "Инверсия направления эффекта\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "offset",
+				"description": "Смещение эффекта\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "RGBcolor",
+				"description": "Начальный цвет\n",
+				"valueType": "color",
+				"valueDefault": "0 0 255"
+			},
+			{
+				"name": "ledTopic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/ledBar_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "setRGB",
+				"description": "Установить новый целевой цвет. \n       Цвет задаётся десятичными значениями R G B через пробел\n",
+				"parametersType": "types",
+				"parameters": [ "int ", "int ", "int " ]
+			},
+			{
+				"command": "setPos",
+				"description": "Установить новую текущую позичию\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			}
+		]
+	},
+
+	{
+		"mode": "counter",
+		"description": "\n    Виртуальный модуль счетчик\n",
+		"options": [
+			{
+				"name": "maxVal",
+				"description": "Максимальное значение счетчика.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "minVal",
+				"description": "Минимальное значение счетчика.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "threshold",
+				"description": "Пороговое значение счетчика.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "circularCounter",
+				"description": "Сброс к противоположному значению при переполнении счетчика.\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "topic",
+				"description": "Не cтандартный топик для таймера\n",
+				"valueType": "string",
+				"valueDefault": "/counter_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "set",
+				"description": "Установка значений счетчика\n       Параметр может быть задан инкрментально или обсалютно\n",
+				"parametersType": "types",
+				"parameters": [ "string " ]
+			}
+		]
+	},
+	{
+		"mode": "random",
+		"description": "\n    Модуль для генерации случайных чисел\n",
+		"options": [
+			{
+				"name": "maxVal",
+				"description": "\n            Максимальное значение.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "minVal",
+				"description": "Минимальное значение.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "topic",
+				"description": "Не cтандартный топик для таймера\n",
+				"valueType": "string",
+				"valueDefault": "/random_0"
+			}
+		],
+		"reports": [
+			{
+				"description": "Возвращает сгенерированное значение\n\n\t",
+				"valueType": "int",
+				"unit": "",
+				"topic": ""
+			}
+		],
+		"commands": [
+			{
+				"command": "generate",
+				"description": "Запуск генератора случайных чисел\n",
+				"parametersType": "types",
+				"parameters": [ " " ]
+			}
+		]
+	},
+	{
+		"mode": "timer",
+		"description": "\n    Виртуальный модуль таймер\n",
+		"options": [
+			{
+				"name": "time",
+				"description": "Число, время через которе сработает таймер. Еденицы измерения мс.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 0,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Не cтандартный топик для таймера\n",
+				"valueType": "string",
+				"valueDefault": "/timer_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "start",
+				"description": "Запустить таймер\n        Опционально - время таймера, если параметр не задан или равен 0 будет использован параметр заданный в опциях\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "stop",
+				"description": "Сброс таймер\n",
+				"parametersType": "types",
+				"parameters": [ " " ]
+			}
+		]
+	},
+	{
+		"mode": "whitelist",
+		"description": "\n    Программный модуль для размещения связей во внешнем файле. Виртуальный слот, не взаимодействует с аппаратной частью.\n",
+		"options": [
+			{
+				"name": "filename",
+				"description": "\n            Имя файла со списком. По умолчанию whitelist.txt.\n",
+				"valueType": "string",
+				"valueDefault": ""
+			},
+			{
+				"name": "topic",
+				"description": "Не cтандартный топик для таймера\n",
+				"valueType": "string",
+				"valueDefault": "/whitelist_0"
+			}
+		],
+		"reports": [
+			{
+				"description": "Возвращает если совпадений не найдено\n\t",
+				"valueType": "int",
+				"unit": "",
+				"topic": "noMatches"
+			}
+		],
+		"commands": [
+			{
+				"command": "check",
+				"description": "Запуск проверки\n",
+				"parametersType": "types",
+				"parameters": [ "string " ]
+			}
+		]
+	},
+
+	{
+		"mode": "audioPlayer",
+		"description": "\n    Звуковой Модуль\n",
+		"options": [
+			{
+				"name": "volume",
+				"description": "Уровень громкости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 70,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "speed",
+				"description": "Скорость воспроизведения\n\t",
+				"valueType": "float",
+				"valueDefault": 1.09,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "tone",
+				"description": "Сдвиг тональности\n\t",
+				"valueType": "float",
+				"valueDefault": 1,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "eqLow",
+				"description": "Нижняя граница эквалайзера\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": -13,
+				"valueMax": 0,
+				"valueMin": -20
+			},
+			{
+				"name": "eqMid",
+				"description": "Средняя граница эквалайзера\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": -13,
+				"valueMax": 0,
+				"valueMin": -20
+			},
+			{
+				"name": "eqHigh",
+				"description": "Верхняя граница эквалайзера\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": -13,
+				"valueMax": 0,
+				"valueMin": -20
+			},
+			{
+				"name": "attenuation",
+				"description": "Использовать затухание\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "playDelay",
+				"description": "Пауза перед проигрыванием\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 0
+			},
+			{
+				"name": "playToEnd",
+				"description": "Проигрывать до конца\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "topic",
+				"description": "Проигрывать до конца\n\t",
+				"valueType": "string",
+				"valueDefault": "/player_0"
+			}
+		],
+		"reports": [
+			{
+				"description": "Рапортует номер трека при завершении\n\t",
+				"valueType": "string",
+				"unit": "",
+				"topic": "endOfTrack"
+			}
+		],
+		"commands": [
+			{
+				"command": "play",
+				"description": "Проиграть трек\n       Опционально - номер трека\n",
+				"parametersType": "types",
+				"parameters": [ "string " ]
+			},
+			{
+				"command": "stop",
+				"description": "Остановить проигрывание\n       \n",
+				"parametersType": "types",
+				"parameters": [ " " ]
+			},
+			{
+				"command": "shift",
+				"description": "Переключить трек\n       \n",
+				"parametersType": "types",
+				"parameters": [ "string " ]
+			},
+			{
+				"command": "setVolume",
+				"description": "Установить громкость\n       \n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			}
+		]
+	},
+
+	{
+		"mode": "pwmRGB",
+		"description": "\n    Модуль управляет RGB-лентой\n",
+		"options": [
+			{
+				"name": "increment",
+				"description": "Величина приращения значения свечения\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "inverse",
+				"description": "Инверсия значений\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальная яркость\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальная яркость\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 40,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "RGBcolor",
+				"description": "Начальный цвет\n",
+				"valueType": "color",
+				"valueDefault": "0 0 255"
+			},
+			{
+				"name": "ledMode",
+				"description": "Задаёт режим анимации",
+				"valueType": "enum",
+				"values": [ "default", "flash", "glitch", "swiper", "rainbow", "run" ]
+			},
+			{
+				"name": "defaultState",
+				"description": "Состояние по умолчанию\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/pwmRGB_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "NULL",
+				"description": "Числовое значение.\n       задаёт текущее состояние светодиода (вкл/выкл)\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setRGB",
+				"description": "Установить новый целевой цвет. \n       Цвет задаётся десятичными значениями R G B через пробел\n",
+				"parametersType": "types",
+				"parameters": [ "int ", "int ", "int " ]
+			},
+			{
+				"command": "setMode",
+				"description": "Установить новый режим анимации цветов\n",
+				"parametersType": "enum",
+				"parameters": [ "default", "flash", "glitch", "swiper", "rainbow", "run" ]
+			},
+			{
+				"command": "setIncrement",
+				"description": "Установить новое значение приращения\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setMaxBright",
+				"description": "Установить максимальное значение яркости\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setMinBright",
+				"description": "Установить минимальное значение яркости\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			}
+		]
+	},
+
+	{
+		"mode": "adc1",
+		"description": "\n    Модуль реализует поддержку первого ADC\n",
+		"options": [
+			{
+				"name": "floatOutput",
+				"description": "Флаг определяет формат воводящего значения, \n\t\tесли указан - будет выводиться значение с плавающей точкой,\n\t\tиначе - целочисленное\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "maxVal",
+				"description": "Определяет верхний порог значений",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 4095,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "minVal",
+				"description": "Определяет нижний порог значений",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "inverse",
+				"description": "Флаг задаёт инвертирование значений",
+				"valueType": "flag"
+			},
+			{
+				"name": "filterK",
+				"description": "Коэфициент фильтрации",
+				"valueType": "float",
+				"valueDefault": 1,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "deadBand",
+				"description": "Фильтрация дребезга - определяет порог срабатывания",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4095,
+				"valueMin": 1
+			},
+			{
+				"name": "periodic",
+				"description": "Задаёт периодичночть отсчётов в миллисекундах",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/adc_0"
+			},
+			{
+				"name": "dividerMode",
+				"description": "Задаёт режим делителя",
+				"valueType": "enum",
+				"values": [ "5V", "3V3", "10V" ]
+			}
+		],
+		"reports": [
+			{
+				"description": "Возвращает текущее значение канала ввиде числа с плавающей точкой, выражающее отношение к заданной шкале\n\t",
+				"valueType": "ratio",
+				"unit": "unit",
+				"topic": ""
+			},
+			{
+				"description": "Возвращает текущее сырое целочисленное значение канала\n\t",
+				"valueType": "int",
+				"unit": "unit",
+				"topic": ""
+			}
+		],
+		"commands": [
+		]
+	},
+
+	{
+		"mode": "analog",
+		"description": "\n    Старая версия поддержки ADC\n",
+		"options": [
+			{
+				"name": "floatOutput",
+				"description": "Флаг определяет формат воводящего значения, \n          если указан - будет выводиться значение с плавающей точкой,\n          иначе - целочисленное\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "maxVal",
+				"description": "Определяет верхний порог значений",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "minVal",
+				"description": "Определяет нижний порог значений",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "inverse",
+				"description": "Флаг задаёт инвертирование значений",
+				"valueType": "flag"
+			},
+			{
+				"name": "filterK",
+				"description": "Коэфициент фильтрации",
+				"valueType": "float",
+				"valueDefault": 1,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "deadBand",
+				"description": "Фильтрация дребезга - определяет порог срабатывания",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "periodic",
+				"description": "Задаёт периодичночть отсчётов в миллисекундах",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/adc_0"
+			},
+			{
+				"name": "dividerMode",
+				"description": "Задаёт режим делителя",
+				"valueType": "enum",
+				"values": [ "5V", "3V3", "10V" ]
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+		]
+	},
+
+	{
+		"mode": "button_led",
+		"description": "\n    Модуль светодиодной кнопки\n",
+		"options": [
+			{
+				"name": "buttonInverse",
+				"description": "Флаг определяет инверсию кнопки\n\t\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "buttonDebounceGap",
+				"description": "Глубина фильтра дребезга\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "longPressTime",
+				"description": "Продолжительность длинного нажатия\n\t\t   Ненулевое значение этого параметра меняет логику обработки кнопки: ввиду того, что для определения \n\t\t   времени нажатия необходимо ожидать отпускание кнопки, информаци о её нажатии будет оправлена \n\t\t   только в момент её отпускания. Если не будет достигнута продолжительность длинного нажатия.\n\t\t",
+				"valueType": "int",
+				"unit": "ms",
+				"valueDefault": 0,
+				"valueMax": 65535,
+				"valueMin": 0
+			},
+			{
+				"name": "doubleClickTime",
+				"description": "Длительность промежутка между нажатиями для регистрации двойного нажатия\n\t\t",
+				"valueType": "int",
+				"unit": "ms",
+				"valueDefault": 0,
+				"valueMax": 65535,
+				"valueMin": 0
+			},
+			{
+				"name": "eventfilter",
+				"description": "Флаг задаёт фильтрацию совытий при активных\n\t\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "buttonTopic",
+				"description": "Топик для событий кнопки\n\t\t\t",
+				"valueType": "string",
+				"valueDefault": "/button_0"
+			},
+			{
+				"name": "ledInverse",
+				"description": "Флаг определяет инверсию светодиода\n\t\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "increment",
+				"description": "Интенсивность затухание свечения\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальное свечение\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальное свечение\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 40,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "ledMode",
+				"description": "Задаёт режим анимации",
+				"valueType": "enum",
+				"values": [ "none", "flash", "glitch" ]
+			},
+			{
+				"name": "ledTopic",
+				"description": "Топик для режима свечения\n\t\t\t",
+				"valueType": "string",
+				"valueDefault": "/led_0"
+			}
+		],
+		"reports": [
+			{
+				"description": "Возвращает состояние нажатия кнопки\n\t",
+				"valueType": "int",
+				"unit": "unit",
+				"topic": "nil"
+			},
+			{
+				"description": "Возвращает состояние длинного нажатия кнопки\n\t",
+				"valueType": "int",
+				"unit": "unit",
+				"topic": "longpress"
+			},
+			{
+				"description": "Возвращает состояние двойного нажатия кнопки\n\t",
+				"valueType": "int",
+				"unit": "unit",
+				"topic": "doubleClick"
+			}
+		],
+		"commands": [
+			{
+				"command": "NULL",
+				"description": "Числовое значение.\n       задаёт текущее состояние светодиода (вкл/выкл)\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			}
+		]
+	},
+
+	{
+		"mode": "encoderPPM",
+		"description": "\n\tМодуль энкодера с фазово импульсной модуляцией(PPM)\n",
+		"options": [
+			{
+				"name": "absolute",
+				"description": "Флаг определяет абслютный режим работы энкодера, \n\t\t\tиначе - инкрементальный\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "floatOutput",
+				"description": "Флаг определяет значение с плавающей точкой,\n\t\t   иначе - целочисленное\n\t\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "dirInverse",
+				"description": "Флаг задаёт инверсию направления",
+				"valueType": "flag"
+			},
+			{
+				"name": "zeroShift",
+				"description": "Значение смещения нуля\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "calibration",
+				"description": "Флаг задаёт необходимость калибровки",
+				"valueType": "flag"
+			},
+			{
+				"name": "filterK",
+				"description": "Флаг задаёт необходимость калибровки",
+				"valueType": "float",
+				"valueDefault": 1,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "deadZone",
+				"description": "Флаг задаёт необходимость калибровки",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "offset",
+				"description": "Флаг задаёт необходимость калибровки",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "pwmMinVal",
+				"description": "Минимальное значение",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "pwmMaxVal",
+				"description": "Максимальное значение",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "refreshRate",
+				"description": "Максимальное значение",
+				"valueType": "int",
+				"unit": "fps",
+				"valueDefault": 20,
+				"valueMax": 100,
+				"valueMin": 1
+			},
+			{
+				"name": "numOfPos",
+				"description": "Количество положений\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/encoder_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+		]
+	},
+	{
+		"mode": "encoderInc",
+		"description": "\n\tМодуль для работы с инкрементальными энкодерами, обычно оптический.\n",
+		"options": [
+			{
+				"name": "absolute",
+				"description": "Флаг определяет абслютный режим работы энкодера, \n\t\tПо умолчанию  - инкрементальный\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "floatOutput",
+				"description": "Флаг настраивает выходные значения в виде числа с плавающей точкой от 0.0 до 1.0 \n\t\tпо умолчания - целочисленное\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "dirInverse",
+				"description": "Флаг задаёт инверсию направления",
+				"valueType": "flag"
+			},
+			{
+				"name": "linearCounter",
+				"description": "Флаг, режим работы энкода в виде линейного счетчика при достижении максимального и минимальных значений счет будет остановлен, \n\t\tПо умолчанию - счетчик работает в зациклен, и при достижении минимального значения переходит с камсимальному и на оборот\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "glitchFilter",
+				"description": "Значение аппаратного фильтра\n\t\t- еденицы измерения наносекунды\n\t",
+				"valueType": "int",
+				"unit": "ns",
+				"valueDefault": 800,
+				"valueMax": 4095,
+				"valueMin": 1
+			},
+			{
+				"name": "zeroShift",
+				"description": "Значение смещения нуля после делителя\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "minVal",
+				"description": "Минимальное значение",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "maxVal",
+				"description": "Максимальное значение\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 4096,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период проверки значений\n\t\t- еденицы измерения раз в секунду\n\t",
+				"valueType": "int",
+				"unit": "fps",
+				"valueDefault": 20,
+				"valueMax": 100,
+				"valueMin": 1
+			},
+			{
+				"name": "divider",
+				"description": "Делитель",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 4,
+				"valueMax": 0,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/encoder_0"
+			}
+		],
+		"reports": [
+			{
+				"description": "Рапортует текущее значение\n\t",
+				"valueType": "string",
+				"unit": "",
+				"topic": ""
+			}
+		],
+		"commands": [
+			{
+				"command": "reset",
+				"description": "Обнуляет счетчик\n",
+				"parametersType": "types",
+				"parameters": [ " " ]
+			}
+		]
+	},
+	{
+		"mode": "encoderAS5600",
+		"description": "\n\tМодуль для работы с инкрементальными энкодерами, обычно оптический.\n",
+		"options": [
+			{
+				"name": "absolute",
+				"description": "Флаг определяет абслютный режим работы энкодера, \n\t\tПо умолчанию  - инкрементальный\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "floatOutput",
+				"description": "Флаг натраивает выходные значения в виде числа с плавающей точкой,\n\t\tиначе - целочисленное\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "dirInverse",
+				"description": "Флаг задаёт инверсию направления",
+				"valueType": "flag"
+			},
+			{
+				"name": "deadZone",
+				"description": "Значение зоны не чуствительности\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "zeroShift",
+				"description": "Значение смещения нуля после делителя\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "filterK",
+				"description": "Значение смещения нуля после делителя\n\t",
+				"valueType": "float",
+				"valueDefault": 1,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "minVal",
+				"description": "Минимальное значение",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "maxVal",
+				"description": "Максимальное значение\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 4096,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период проверки значений\n\t\t- еденицы измерения раз в секунду\n\t",
+				"valueType": "int",
+				"unit": "fps",
+				"valueDefault": 20,
+				"valueMax": 100,
+				"valueMin": 1
+			},
+			{
+				"name": "divider",
+				"description": "Делитель",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 4,
+				"valueMax": 0,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/encoder_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+		]
+	},
+
+	{
+		"mode": "button_smartLed",
+		"description": "\n    Модуль поддержки Smart-LED\n",
+		"options": [
+			{
+				"name": "numOfLed",
+				"description": "Количенство светодиодов\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 24,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "ledInverse",
+				"description": "Флаг задаёт инвертирование значений \n",
+				"valueType": "flag"
+			},
+			{
+				"name": "defaultState",
+				"description": "Состояние по умолчанию\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 1,
+				"valueMin": 0
+			},
+			{
+				"name": "increment",
+				"description": "Величина приращения\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления \n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 1000,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "RGBcolor",
+				"description": "Начальный цвет\n",
+				"valueType": "color",
+				"valueDefault": "0 0 255"
+			},
+			{
+				"name": "ledMode",
+				"description": "Задаёт режим анимации",
+				"valueType": "enum",
+				"values": [ "default", "flash", "glitch", "swiper", "rainbow", "run" ]
+			},
+			{
+				"name": "ledTopic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/smartLed_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "NULL",
+				"description": "Числовое значение.\n       задаёт текущее состояние светодиода (вкл/выкл)\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setRGB",
+				"description": "Установить новый целевой цвет. \n       Цвет задаётся десятичными значениями R G B через пробел\n",
+				"parametersType": "types",
+				"parameters": [ "int ", "int ", "int " ]
+			},
+			{
+				"command": "setMode",
+				"description": "Установить новый режим анимации цветов\n",
+				"parametersType": "enum",
+				"parameters": [ "default", "flash", "glitch", "swiper", "rainbow", "run" ]
+			},
+			{
+				"command": "setIncrement",
+				"description": "Установить новое значение приращения\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			}
+		]
+	},
+	{
+		"mode": "button_swiperLed",
+		"description": "\n   Модуль поддержки SWIPER LED\n",
+		"options": [
+			{
+				"name": "numOfLed",
+				"description": "Количенство светодиодов\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 16,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления \n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 25,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "RGBcolor",
+				"description": "Начальный цвет\n",
+				"valueType": "color",
+				"valueDefault": "0 0 255"
+			},
+			{
+				"name": "ledTopic",
+				"description": "Начальный цвет\n",
+				"valueType": "string",
+				"valueDefault": "/swiperLed_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "swipe",
+				"description": "Анимация эфекта\n",
+				"parametersType": "enum",
+				"parameters": [ "up", "down", "left", "right" ]
+			}
+		]
+	},
+	{
+		"mode": "button_ledRing",
+		"description": "\n    Модуль поддержки светового кольца\n",
+		"options": [
+			{
+				"name": "numOfLed",
+				"description": "Количенство светодиодов\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 24,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "increment",
+				"description": "Величина приращения\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления \n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 30,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "numOfPos",
+				"description": "Количество позиций\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "effectLen",
+				"description": "Длинна эффекта\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "defaultState",
+				"description": "Состояние по умолчанию\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 1,
+				"valueMin": 0
+			},
+			{
+				"name": "dirInverse",
+				"description": "Инверсия направления эффекта\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "offset",
+				"description": "Смещение эффекта\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "ledMode",
+				"description": "Задаёт режим анимации",
+				"valueType": "enum",
+				"values": [ "default", "flash", "glitch", "swiper", "rainbow", "run" ]
+			},
+			{
+				"name": "RGBcolor",
+				"description": "Начальный цвет\n",
+				"valueType": "color",
+				"valueDefault": "0 0 255"
+			},
+			{
+				"name": "ledTopic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/ledRing_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "NULL",
+				"description": "Числовое значение.\n       задаёт текущее состояние светодиода (вкл/выкл)\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setRGB",
+				"description": "Установить новый целевой цвет. \n       Цвет задаётся десятичными значениями R G B через пробел\n",
+				"parametersType": "types",
+				"parameters": [ "int ", "int ", "int " ]
+			},
+			{
+				"command": "setPos",
+				"description": "Установить новую текущую позичию\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setPos",
+				"description": "Установить новую текущую позичию\n",
+				"parametersType": "types",
+				"parameters": [ "string " ]
+			}
+		]
+	},
+	{
+		"mode": "button_ledBar",
+		"description": "\n    Модуль поддержки светового блока\n",
+		"options": [
+			{
+				"name": "numOfLed",
+				"description": "Количенство светодиодов\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 24,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "increment",
+				"description": "Величина приращения\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления \n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 1000,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "numOfPos",
+				"description": "Количество позиций\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "defaultState",
+				"description": "Состояние по умолчанию\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 1,
+				"valueMin": 0
+			},
+			{
+				"name": "dirInverse",
+				"description": "Инверсия направления эффекта\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "offset",
+				"description": "Смещение эффекта\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "RGBcolor",
+				"description": "Начальный цвет\n",
+				"valueType": "color",
+				"valueDefault": "0 0 255"
+			},
+			{
+				"name": "ledTopic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/ledBar_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "setRGB",
+				"description": "Установить новый целевой цвет. \n       Цвет задаётся десятичными значениями R G B через пробел\n",
+				"parametersType": "types",
+				"parameters": [ "int ", "int ", "int " ]
+			},
+			{
+				"command": "setPos",
+				"description": "Установить новую текущую позичию\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			}
+		]
+	},
+
+	{
+		"mode": "counter",
+		"description": "\n    Виртуальный модуль счетчик\n",
+		"options": [
+			{
+				"name": "maxVal",
+				"description": "Максимальное значение счетчика.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "minVal",
+				"description": "Минимальное значение счетчика.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "threshold",
+				"description": "Пороговое значение счетчика.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "circularCounter",
+				"description": "Сброс к противоположному значению при переполнении счетчика.\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "topic",
+				"description": "Не cтандартный топик для таймера\n",
+				"valueType": "string",
+				"valueDefault": "/counter_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "set",
+				"description": "Установка значений счетчика\n       Параметр может быть задан инкрментально или обсалютно\n",
+				"parametersType": "types",
+				"parameters": [ "string " ]
+			}
+		]
+	},
+	{
+		"mode": "random",
+		"description": "\n    Модуль для генерации случайных чисел\n",
+		"options": [
+			{
+				"name": "maxVal",
+				"description": "\n            Максимальное значение.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "minVal",
+				"description": "Минимальное значение.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "topic",
+				"description": "Не cтандартный топик для таймера\n",
+				"valueType": "string",
+				"valueDefault": "/random_0"
+			}
+		],
+		"reports": [
+			{
+				"description": "Возвращает сгенерированное значение\n\n\t",
+				"valueType": "int",
+				"unit": "",
+				"topic": ""
+			}
+		],
+		"commands": [
+			{
+				"command": "generate",
+				"description": "Запуск генератора случайных чисел\n",
+				"parametersType": "types",
+				"parameters": [ " " ]
+			}
+		]
+	},
+	{
+		"mode": "timer",
+		"description": "\n    Виртуальный модуль таймер\n",
+		"options": [
+			{
+				"name": "time",
+				"description": "Число, время через которе сработает таймер. Еденицы измерения мс.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 0,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Не cтандартный топик для таймера\n",
+				"valueType": "string",
+				"valueDefault": "/timer_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "start",
+				"description": "Запустить таймер\n        Опционально - время таймера, если параметр не задан или равен 0 будет использован параметр заданный в опциях\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "stop",
+				"description": "Сброс таймер\n",
+				"parametersType": "types",
+				"parameters": [ " " ]
+			}
+		]
+	},
+	{
+		"mode": "whitelist",
+		"description": "\n    Программный модуль для размещения связей во внешнем файле. Виртуальный слот, не взаимодействует с аппаратной частью.\n",
+		"options": [
+			{
+				"name": "filename",
+				"description": "\n            Имя файла со списком. По умолчанию whitelist.txt.\n",
+				"valueType": "string",
+				"valueDefault": ""
+			},
+			{
+				"name": "topic",
+				"description": "Не cтандартный топик для таймера\n",
+				"valueType": "string",
+				"valueDefault": "/whitelist_0"
+			}
+		],
+		"reports": [
+			{
+				"description": "Возвращает если совпадений не найдено\n\t",
+				"valueType": "int",
+				"unit": "",
+				"topic": "noMatches"
+			}
+		],
+		"commands": [
+			{
+				"command": "check",
+				"description": "Запуск проверки\n",
+				"parametersType": "types",
+				"parameters": [ "string " ]
+			}
+		]
+	},
+
+	{
+		"mode": "audioPlayer",
+		"description": "\n    Звуковой Модуль\n",
+		"options": [
+			{
+				"name": "volume",
+				"description": "Уровень громкости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 70,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "speed",
+				"description": "Скорость воспроизведения\n\t",
+				"valueType": "float",
+				"valueDefault": 1.09,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "tone",
+				"description": "Сдвиг тональности\n\t",
+				"valueType": "float",
+				"valueDefault": 1,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "eqLow",
+				"description": "Нижняя граница эквалайзера\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": -13,
+				"valueMax": 0,
+				"valueMin": -20
+			},
+			{
+				"name": "eqMid",
+				"description": "Средняя граница эквалайзера\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": -13,
+				"valueMax": 0,
+				"valueMin": -20
+			},
+			{
+				"name": "eqHigh",
+				"description": "Верхняя граница эквалайзера\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": -13,
+				"valueMax": 0,
+				"valueMin": -20
+			},
+			{
+				"name": "attenuation",
+				"description": "Использовать затухание\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "playDelay",
+				"description": "Пауза перед проигрыванием\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 0
+			},
+			{
+				"name": "playToEnd",
+				"description": "Проигрывать до конца\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "topic",
+				"description": "Проигрывать до конца\n\t",
+				"valueType": "string",
+				"valueDefault": "/player_0"
+			}
+		],
+		"reports": [
+			{
+				"description": "Рапортует номер трека при завершении\n\t",
+				"valueType": "string",
+				"unit": "",
+				"topic": "endOfTrack"
+			}
+		],
+		"commands": [
+			{
+				"command": "play",
+				"description": "Проиграть трек\n       Опционально - номер трека\n",
+				"parametersType": "types",
+				"parameters": [ "string " ]
+			},
+			{
+				"command": "stop",
+				"description": "Остановить проигрывание\n       \n",
+				"parametersType": "types",
+				"parameters": [ " " ]
+			},
+			{
+				"command": "shift",
+				"description": "Переключить трек\n       \n",
+				"parametersType": "types",
+				"parameters": [ "string " ]
+			},
+			{
+				"command": "setVolume",
+				"description": "Установить громкость\n       \n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			}
+		]
+	},
+
+	{
+		"mode": "pwmRGB",
+		"description": "\n    Модуль управляет RGB-лентой\n",
+		"options": [
+			{
+				"name": "increment",
+				"description": "Величина приращения значения свечения\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "inverse",
+				"description": "Инверсия значений\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальная яркость\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальная яркость\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 40,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "RGBcolor",
+				"description": "Начальный цвет\n",
+				"valueType": "color",
+				"valueDefault": "0 0 255"
+			},
+			{
+				"name": "ledMode",
+				"description": "Задаёт режим анимации",
+				"valueType": "enum",
+				"values": [ "default", "flash", "glitch", "swiper", "rainbow", "run" ]
+			},
+			{
+				"name": "defaultState",
+				"description": "Состояние по умолчанию\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/pwmRGB_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "NULL",
+				"description": "Числовое значение.\n       задаёт текущее состояние светодиода (вкл/выкл)\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setRGB",
+				"description": "Установить новый целевой цвет. \n       Цвет задаётся десятичными значениями R G B через пробел\n",
+				"parametersType": "types",
+				"parameters": [ "int ", "int ", "int " ]
+			},
+			{
+				"command": "setMode",
+				"description": "Установить новый режим анимации цветов\n",
+				"parametersType": "enum",
+				"parameters": [ "default", "flash", "glitch", "swiper", "rainbow", "run" ]
+			},
+			{
+				"command": "setIncrement",
+				"description": "Установить новое значение приращения\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setMaxBright",
+				"description": "Установить максимальное значение яркости\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setMinBright",
+				"description": "Установить минимальное значение яркости\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			}
+		]
+	},
+
+	{
+		"mode": "adc1",
+		"description": "\n    Модуль реализует поддержку первого ADC\n",
+		"options": [
+			{
+				"name": "floatOutput",
+				"description": "Флаг определяет формат воводящего значения, \n\t\tесли указан - будет выводиться значение с плавающей точкой,\n\t\tиначе - целочисленное\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "maxVal",
+				"description": "Определяет верхний порог значений",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 4095,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "minVal",
+				"description": "Определяет нижний порог значений",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "inverse",
+				"description": "Флаг задаёт инвертирование значений",
+				"valueType": "flag"
+			},
+			{
+				"name": "filterK",
+				"description": "Коэфициент фильтрации",
+				"valueType": "float",
+				"valueDefault": 1,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "deadBand",
+				"description": "Фильтрация дребезга - определяет порог срабатывания",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4095,
+				"valueMin": 1
+			},
+			{
+				"name": "periodic",
+				"description": "Задаёт периодичночть отсчётов в миллисекундах",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/adc_0"
+			},
+			{
+				"name": "dividerMode",
+				"description": "Задаёт режим делителя",
+				"valueType": "enum",
+				"values": [ "5V", "3V3", "10V" ]
+			}
+		],
+		"reports": [
+			{
+				"description": "Возвращает текущее значение канала ввиде числа с плавающей точкой, выражающее отношение к заданной шкале\n\t",
+				"valueType": "ratio",
+				"unit": "unit",
+				"topic": ""
+			},
+			{
+				"description": "Возвращает текущее сырое целочисленное значение канала\n\t",
+				"valueType": "int",
+				"unit": "unit",
+				"topic": ""
+			}
+		],
+		"commands": [
+		]
+	},
+
+	{
+		"mode": "analog",
+		"description": "\n    Старая версия поддержки ADC\n",
+		"options": [
+			{
+				"name": "floatOutput",
+				"description": "Флаг определяет формат воводящего значения, \n          если указан - будет выводиться значение с плавающей точкой,\n          иначе - целочисленное\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "maxVal",
+				"description": "Определяет верхний порог значений",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "minVal",
+				"description": "Определяет нижний порог значений",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "inverse",
+				"description": "Флаг задаёт инвертирование значений",
+				"valueType": "flag"
+			},
+			{
+				"name": "filterK",
+				"description": "Коэфициент фильтрации",
+				"valueType": "float",
+				"valueDefault": 1,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "deadBand",
+				"description": "Фильтрация дребезга - определяет порог срабатывания",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "periodic",
+				"description": "Задаёт периодичночть отсчётов в миллисекундах",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/adc_0"
+			},
+			{
+				"name": "dividerMode",
+				"description": "Задаёт режим делителя",
+				"valueType": "enum",
+				"values": [ "5V", "3V3", "10V" ]
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+		]
+	},
+
+	{
+		"mode": "button_led",
+		"description": "\n    Модуль светодиодной кнопки\n",
+		"options": [
+			{
+				"name": "buttonInverse",
+				"description": "Флаг определяет инверсию кнопки\n\t\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "buttonDebounceGap",
+				"description": "Глубина фильтра дребезга\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "longPressTime",
+				"description": "Продолжительность длинного нажатия\n\t\t   Ненулевое значение этого параметра меняет логику обработки кнопки: ввиду того, что для определения \n\t\t   времени нажатия необходимо ожидать отпускание кнопки, информаци о её нажатии будет оправлена \n\t\t   только в момент её отпускания. Если не будет достигнута продолжительность длинного нажатия.\n\t\t",
+				"valueType": "int",
+				"unit": "ms",
+				"valueDefault": 0,
+				"valueMax": 65535,
+				"valueMin": 0
+			},
+			{
+				"name": "doubleClickTime",
+				"description": "Длительность промежутка между нажатиями для регистрации двойного нажатия\n\t\t",
+				"valueType": "int",
+				"unit": "ms",
+				"valueDefault": 0,
+				"valueMax": 65535,
+				"valueMin": 0
+			},
+			{
+				"name": "eventfilter",
+				"description": "Флаг задаёт фильтрацию совытий при активных\n\t\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "buttonTopic",
+				"description": "Топик для событий кнопки\n\t\t\t",
+				"valueType": "string",
+				"valueDefault": "/button_0"
+			},
+			{
+				"name": "ledInverse",
+				"description": "Флаг определяет инверсию светодиода\n\t\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "increment",
+				"description": "Интенсивность затухание свечения\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальное свечение\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальное свечение\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 40,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "ledMode",
+				"description": "Задаёт режим анимации",
+				"valueType": "enum",
+				"values": [ "none", "flash", "glitch" ]
+			},
+			{
+				"name": "ledTopic",
+				"description": "Топик для режима свечения\n\t\t\t",
+				"valueType": "string",
+				"valueDefault": "/led_0"
+			}
+		],
+		"reports": [
+			{
+				"description": "Возвращает состояние нажатия кнопки\n\t",
+				"valueType": "int",
+				"unit": "unit",
+				"topic": "nil"
+			},
+			{
+				"description": "Возвращает состояние длинного нажатия кнопки\n\t",
+				"valueType": "int",
+				"unit": "unit",
+				"topic": "longpress"
+			},
+			{
+				"description": "Возвращает состояние двойного нажатия кнопки\n\t",
+				"valueType": "int",
+				"unit": "unit",
+				"topic": "doubleClick"
+			}
+		],
+		"commands": [
+			{
+				"command": "NULL",
+				"description": "Числовое значение.\n       задаёт текущее состояние светодиода (вкл/выкл)\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			}
+		]
+	},
+
+	{
+		"mode": "encoderPPM",
+		"description": "\n\tМодуль энкодера с фазово импульсной модуляцией(PPM)\n",
+		"options": [
+			{
+				"name": "absolute",
+				"description": "Флаг определяет абслютный режим работы энкодера, \n\t\t\tиначе - инкрементальный\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "floatOutput",
+				"description": "Флаг определяет значение с плавающей точкой,\n\t\t   иначе - целочисленное\n\t\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "dirInverse",
+				"description": "Флаг задаёт инверсию направления",
+				"valueType": "flag"
+			},
+			{
+				"name": "zeroShift",
+				"description": "Значение смещения нуля\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "calibration",
+				"description": "Флаг задаёт необходимость калибровки",
+				"valueType": "flag"
+			},
+			{
+				"name": "filterK",
+				"description": "Флаг задаёт необходимость калибровки",
+				"valueType": "float",
+				"valueDefault": 1,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "deadZone",
+				"description": "Флаг задаёт необходимость калибровки",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "offset",
+				"description": "Флаг задаёт необходимость калибровки",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "pwmMinVal",
+				"description": "Минимальное значение",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "pwmMaxVal",
+				"description": "Максимальное значение",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "refreshRate",
+				"description": "Максимальное значение",
+				"valueType": "int",
+				"unit": "fps",
+				"valueDefault": 20,
+				"valueMax": 100,
+				"valueMin": 1
+			},
+			{
+				"name": "numOfPos",
+				"description": "Количество положений\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/encoder_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+		]
+	},
+	{
+		"mode": "encoderInc",
+		"description": "\n\tМодуль для работы с инкрементальными энкодерами, обычно оптический.\n",
+		"options": [
+			{
+				"name": "absolute",
+				"description": "Флаг определяет абслютный режим работы энкодера, \n\t\tПо умолчанию  - инкрементальный\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "floatOutput",
+				"description": "Флаг настраивает выходные значения в виде числа с плавающей точкой от 0.0 до 1.0 \n\t\tпо умолчания - целочисленное\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "dirInverse",
+				"description": "Флаг задаёт инверсию направления",
+				"valueType": "flag"
+			},
+			{
+				"name": "linearCounter",
+				"description": "Флаг, режим работы энкода в виде линейного счетчика при достижении максимального и минимальных значений счет будет остановлен, \n\t\tПо умолчанию - счетчик работает в зациклен, и при достижении минимального значения переходит с камсимальному и на оборот\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "glitchFilter",
+				"description": "Значение аппаратного фильтра\n\t\t- еденицы измерения наносекунды\n\t",
+				"valueType": "int",
+				"unit": "ns",
+				"valueDefault": 800,
+				"valueMax": 4095,
+				"valueMin": 1
+			},
+			{
+				"name": "zeroShift",
+				"description": "Значение смещения нуля после делителя\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "minVal",
+				"description": "Минимальное значение",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "maxVal",
+				"description": "Максимальное значение\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 4096,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период проверки значений\n\t\t- еденицы измерения раз в секунду\n\t",
+				"valueType": "int",
+				"unit": "fps",
+				"valueDefault": 20,
+				"valueMax": 100,
+				"valueMin": 1
+			},
+			{
+				"name": "divider",
+				"description": "Делитель",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 4,
+				"valueMax": 0,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/encoder_0"
+			}
+		],
+		"reports": [
+			{
+				"description": "Рапортует текущее значение\n\t",
+				"valueType": "string",
+				"unit": "",
+				"topic": ""
+			}
+		],
+		"commands": [
+			{
+				"command": "reset",
+				"description": "Обнуляет счетчик\n",
+				"parametersType": "types",
+				"parameters": [ " " ]
+			}
+		]
+	},
+	{
+		"mode": "encoderAS5600",
+		"description": "\n\tМодуль для работы с инкрементальными энкодерами, обычно оптический.\n",
+		"options": [
+			{
+				"name": "absolute",
+				"description": "Флаг определяет абслютный режим работы энкодера, \n\t\tПо умолчанию  - инкрементальный\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "floatOutput",
+				"description": "Флаг натраивает выходные значения в виде числа с плавающей точкой,\n\t\tиначе - целочисленное\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "dirInverse",
+				"description": "Флаг задаёт инверсию направления",
+				"valueType": "flag"
+			},
+			{
+				"name": "deadZone",
+				"description": "Значение зоны не чуствительности\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "zeroShift",
+				"description": "Значение смещения нуля после делителя\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "filterK",
+				"description": "Значение смещения нуля после делителя\n\t",
+				"valueType": "float",
+				"valueDefault": 1,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "minVal",
+				"description": "Минимальное значение",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "maxVal",
+				"description": "Максимальное значение\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 4096,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период проверки значений\n\t\t- еденицы измерения раз в секунду\n\t",
+				"valueType": "int",
+				"unit": "fps",
+				"valueDefault": 20,
+				"valueMax": 100,
+				"valueMin": 1
+			},
+			{
+				"name": "divider",
+				"description": "Делитель",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 4,
+				"valueMax": 0,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/encoder_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+		]
+	},
+
+	{
+		"mode": "button_smartLed",
+		"description": "\n    Модуль поддержки Smart-LED\n",
+		"options": [
+			{
+				"name": "numOfLed",
+				"description": "Количенство светодиодов\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 24,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "ledInverse",
+				"description": "Флаг задаёт инвертирование значений \n",
+				"valueType": "flag"
+			},
+			{
+				"name": "defaultState",
+				"description": "Состояние по умолчанию\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 1,
+				"valueMin": 0
+			},
+			{
+				"name": "increment",
+				"description": "Величина приращения\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления \n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 1000,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "RGBcolor",
+				"description": "Начальный цвет\n",
+				"valueType": "color",
+				"valueDefault": "0 0 255"
+			},
+			{
+				"name": "ledMode",
+				"description": "Задаёт режим анимации",
+				"valueType": "enum",
+				"values": [ "default", "flash", "glitch", "swiper", "rainbow", "run" ]
+			},
+			{
+				"name": "ledTopic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/smartLed_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "NULL",
+				"description": "Числовое значение.\n       задаёт текущее состояние светодиода (вкл/выкл)\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setRGB",
+				"description": "Установить новый целевой цвет. \n       Цвет задаётся десятичными значениями R G B через пробел\n",
+				"parametersType": "types",
+				"parameters": [ "int ", "int ", "int " ]
+			},
+			{
+				"command": "setMode",
+				"description": "Установить новый режим анимации цветов\n",
+				"parametersType": "enum",
+				"parameters": [ "default", "flash", "glitch", "swiper", "rainbow", "run" ]
+			},
+			{
+				"command": "setIncrement",
+				"description": "Установить новое значение приращения\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			}
+		]
+	},
+	{
+		"mode": "button_swiperLed",
+		"description": "\n   Модуль поддержки SWIPER LED\n",
+		"options": [
+			{
+				"name": "numOfLed",
+				"description": "Количенство светодиодов\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 16,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления \n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 25,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "RGBcolor",
+				"description": "Начальный цвет\n",
+				"valueType": "color",
+				"valueDefault": "0 0 255"
+			},
+			{
+				"name": "ledTopic",
+				"description": "Начальный цвет\n",
+				"valueType": "string",
+				"valueDefault": "/swiperLed_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "swipe",
+				"description": "Анимация эфекта\n",
+				"parametersType": "enum",
+				"parameters": [ "up", "down", "left", "right" ]
+			}
+		]
+	},
+	{
+		"mode": "button_ledRing",
+		"description": "\n    Модуль поддержки светового кольца\n",
+		"options": [
+			{
+				"name": "numOfLed",
+				"description": "Количенство светодиодов\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 24,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "increment",
+				"description": "Величина приращения\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления \n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 30,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "numOfPos",
+				"description": "Количество позиций\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "effectLen",
+				"description": "Длинна эффекта\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "defaultState",
+				"description": "Состояние по умолчанию\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 1,
+				"valueMin": 0
+			},
+			{
+				"name": "dirInverse",
+				"description": "Инверсия направления эффекта\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "offset",
+				"description": "Смещение эффекта\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "ledMode",
+				"description": "Задаёт режим анимации",
+				"valueType": "enum",
+				"values": [ "default", "flash", "glitch", "swiper", "rainbow", "run" ]
+			},
+			{
+				"name": "RGBcolor",
+				"description": "Начальный цвет\n",
+				"valueType": "color",
+				"valueDefault": "0 0 255"
+			},
+			{
+				"name": "ledTopic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/ledRing_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "NULL",
+				"description": "Числовое значение.\n       задаёт текущее состояние светодиода (вкл/выкл)\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setRGB",
+				"description": "Установить новый целевой цвет. \n       Цвет задаётся десятичными значениями R G B через пробел\n",
+				"parametersType": "types",
+				"parameters": [ "int ", "int ", "int " ]
+			},
+			{
+				"command": "setPos",
+				"description": "Установить новую текущую позичию\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setPos",
+				"description": "Установить новую текущую позичию\n",
+				"parametersType": "types",
+				"parameters": [ "string " ]
+			}
+		]
+	},
+	{
+		"mode": "button_ledBar",
+		"description": "\n    Модуль поддержки светового блока\n",
+		"options": [
+			{
+				"name": "numOfLed",
+				"description": "Количенство светодиодов\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 24,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "increment",
+				"description": "Величина приращения\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления \n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 1000,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "numOfPos",
+				"description": "Количество позиций\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "defaultState",
+				"description": "Состояние по умолчанию\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 1,
+				"valueMin": 0
+			},
+			{
+				"name": "dirInverse",
+				"description": "Инверсия направления эффекта\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "offset",
+				"description": "Смещение эффекта\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "RGBcolor",
+				"description": "Начальный цвет\n",
+				"valueType": "color",
+				"valueDefault": "0 0 255"
+			},
+			{
+				"name": "ledTopic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/ledBar_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "setRGB",
+				"description": "Установить новый целевой цвет. \n       Цвет задаётся десятичными значениями R G B через пробел\n",
+				"parametersType": "types",
+				"parameters": [ "int ", "int ", "int " ]
+			},
+			{
+				"command": "setPos",
+				"description": "Установить новую текущую позичию\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			}
+		]
+	},
+
+	{
+		"mode": "counter",
+		"description": "\n    Виртуальный модуль счетчик\n",
+		"options": [
+			{
+				"name": "maxVal",
+				"description": "Максимальное значение счетчика.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "minVal",
+				"description": "Минимальное значение счетчика.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "threshold",
+				"description": "Пороговое значение счетчика.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "circularCounter",
+				"description": "Сброс к противоположному значению при переполнении счетчика.\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "topic",
+				"description": "Не cтандартный топик для таймера\n",
+				"valueType": "string",
+				"valueDefault": "/counter_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "set",
+				"description": "Установка значений счетчика\n       Параметр может быть задан инкрментально или обсалютно\n",
+				"parametersType": "types",
+				"parameters": [ "string " ]
+			}
+		]
+	},
+	{
+		"mode": "random",
+		"description": "\n    Модуль для генерации случайных чисел\n",
+		"options": [
+			{
+				"name": "maxVal",
+				"description": "\n            Максимальное значение.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "minVal",
+				"description": "Минимальное значение.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "topic",
+				"description": "Не cтандартный топик для таймера\n",
+				"valueType": "string",
+				"valueDefault": "/random_0"
+			}
+		],
+		"reports": [
+			{
+				"description": "Возвращает сгенерированное значение\n\n\t",
+				"valueType": "int",
+				"unit": "",
+				"topic": ""
+			}
+		],
+		"commands": [
+			{
+				"command": "generate",
+				"description": "Запуск генератора случайных чисел\n",
+				"parametersType": "types",
+				"parameters": [ " " ]
+			}
+		]
+	},
+	{
+		"mode": "timer",
+		"description": "\n    Виртуальный модуль таймер\n",
+		"options": [
+			{
+				"name": "time",
+				"description": "Число, время через которе сработает таймер. Еденицы измерения мс.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 0,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Не cтандартный топик для таймера\n",
+				"valueType": "string",
+				"valueDefault": "/timer_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "start",
+				"description": "Запустить таймер\n        Опционально - время таймера, если параметр не задан или равен 0 будет использован параметр заданный в опциях\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "stop",
+				"description": "Сброс таймер\n",
+				"parametersType": "types",
+				"parameters": [ " " ]
+			}
+		]
+	},
+	{
+		"mode": "whitelist",
+		"description": "\n    Программный модуль для размещения связей во внешнем файле. Виртуальный слот, не взаимодействует с аппаратной частью.\n",
+		"options": [
+			{
+				"name": "filename",
+				"description": "\n            Имя файла со списком. По умолчанию whitelist.txt.\n",
+				"valueType": "string",
+				"valueDefault": ""
+			},
+			{
+				"name": "topic",
+				"description": "Не cтандартный топик для таймера\n",
+				"valueType": "string",
+				"valueDefault": "/whitelist_0"
+			}
+		],
+		"reports": [
+			{
+				"description": "Возвращает если совпадений не найдено\n\t",
+				"valueType": "int",
+				"unit": "",
+				"topic": "noMatches"
+			}
+		],
+		"commands": [
+			{
+				"command": "check",
+				"description": "Запуск проверки\n",
+				"parametersType": "types",
+				"parameters": [ "string " ]
+			}
+		]
+	},
+
+	{
+		"mode": "audioPlayer",
+		"description": "\n    Звуковой Модуль\n",
+		"options": [
+			{
+				"name": "volume",
+				"description": "Уровень громкости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 70,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "speed",
+				"description": "Скорость воспроизведения\n\t",
+				"valueType": "float",
+				"valueDefault": 1.09,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "tone",
+				"description": "Сдвиг тональности\n\t",
+				"valueType": "float",
+				"valueDefault": 1,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "eqLow",
+				"description": "Нижняя граница эквалайзера\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": -13,
+				"valueMax": 0,
+				"valueMin": -20
+			},
+			{
+				"name": "eqMid",
+				"description": "Средняя граница эквалайзера\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": -13,
+				"valueMax": 0,
+				"valueMin": -20
+			},
+			{
+				"name": "eqHigh",
+				"description": "Верхняя граница эквалайзера\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": -13,
+				"valueMax": 0,
+				"valueMin": -20
+			},
+			{
+				"name": "attenuation",
+				"description": "Использовать затухание\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "playDelay",
+				"description": "Пауза перед проигрыванием\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 0
+			},
+			{
+				"name": "playToEnd",
+				"description": "Проигрывать до конца\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "topic",
+				"description": "Проигрывать до конца\n\t",
+				"valueType": "string",
+				"valueDefault": "/player_0"
+			}
+		],
+		"reports": [
+			{
+				"description": "Рапортует номер трека при завершении\n\t",
+				"valueType": "string",
+				"unit": "",
+				"topic": "endOfTrack"
+			}
+		],
+		"commands": [
+			{
+				"command": "play",
+				"description": "Проиграть трек\n       Опционально - номер трека\n",
+				"parametersType": "types",
+				"parameters": [ "string " ]
+			},
+			{
+				"command": "stop",
+				"description": "Остановить проигрывание\n       \n",
+				"parametersType": "types",
+				"parameters": [ " " ]
+			},
+			{
+				"command": "shift",
+				"description": "Переключить трек\n       \n",
+				"parametersType": "types",
+				"parameters": [ "string " ]
+			},
+			{
+				"command": "setVolume",
+				"description": "Установить громкость\n       \n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			}
+		]
+	},
+
+	{
+		"mode": "pwmRGB",
+		"description": "\n    Модуль управляет RGB-лентой\n",
+		"options": [
+			{
+				"name": "increment",
+				"description": "Величина приращения значения свечения\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "inverse",
+				"description": "Инверсия значений\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальная яркость\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальная яркость\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 40,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "RGBcolor",
+				"description": "Начальный цвет\n",
+				"valueType": "color",
+				"valueDefault": "0 0 255"
+			},
+			{
+				"name": "ledMode",
+				"description": "Задаёт режим анимации",
+				"valueType": "enum",
+				"values": [ "default", "flash", "glitch", "swiper", "rainbow", "run" ]
+			},
+			{
+				"name": "defaultState",
+				"description": "Состояние по умолчанию\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/pwmRGB_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "NULL",
+				"description": "Числовое значение.\n       задаёт текущее состояние светодиода (вкл/выкл)\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setRGB",
+				"description": "Установить новый целевой цвет. \n       Цвет задаётся десятичными значениями R G B через пробел\n",
+				"parametersType": "types",
+				"parameters": [ "int ", "int ", "int " ]
+			},
+			{
+				"command": "setMode",
+				"description": "Установить новый режим анимации цветов\n",
+				"parametersType": "enum",
+				"parameters": [ "default", "flash", "glitch", "swiper", "rainbow", "run" ]
+			},
+			{
+				"command": "setIncrement",
+				"description": "Установить новое значение приращения\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setMaxBright",
+				"description": "Установить максимальное значение яркости\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setMinBright",
+				"description": "Установить минимальное значение яркости\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			}
+		]
+	},
+
+	{
+		"mode": "adc1",
+		"description": "\n    Модуль реализует поддержку первого ADC\n",
+		"options": [
+			{
+				"name": "floatOutput",
+				"description": "Флаг определяет формат воводящего значения, \n\t\tесли указан - будет выводиться значение с плавающей точкой,\n\t\tиначе - целочисленное\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "maxVal",
+				"description": "Определяет верхний порог значений",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 4095,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "minVal",
+				"description": "Определяет нижний порог значений",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "inverse",
+				"description": "Флаг задаёт инвертирование значений",
+				"valueType": "flag"
+			},
+			{
+				"name": "filterK",
+				"description": "Коэфициент фильтрации",
+				"valueType": "float",
+				"valueDefault": 1,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "deadBand",
+				"description": "Фильтрация дребезга - определяет порог срабатывания",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4095,
+				"valueMin": 1
+			},
+			{
+				"name": "periodic",
+				"description": "Задаёт периодичночть отсчётов в миллисекундах",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/adc_0"
+			},
+			{
+				"name": "dividerMode",
+				"description": "Задаёт режим делителя",
+				"valueType": "enum",
+				"values": [ "5V", "3V3", "10V" ]
+			}
+		],
+		"reports": [
+			{
+				"description": "Возвращает текущее значение канала ввиде числа с плавающей точкой, выражающее отношение к заданной шкале\n\t",
+				"valueType": "ratio",
+				"unit": "unit",
+				"topic": ""
+			},
+			{
+				"description": "Возвращает текущее сырое целочисленное значение канала\n\t",
+				"valueType": "int",
+				"unit": "unit",
+				"topic": ""
+			}
+		],
+		"commands": [
+		]
+	},
+
+	{
+		"mode": "analog",
+		"description": "\n    Старая версия поддержки ADC\n",
+		"options": [
+			{
+				"name": "floatOutput",
+				"description": "Флаг определяет формат воводящего значения, \n          если указан - будет выводиться значение с плавающей точкой,\n          иначе - целочисленное\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "maxVal",
+				"description": "Определяет верхний порог значений",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "minVal",
+				"description": "Определяет нижний порог значений",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "inverse",
+				"description": "Флаг задаёт инвертирование значений",
+				"valueType": "flag"
+			},
+			{
+				"name": "filterK",
+				"description": "Коэфициент фильтрации",
+				"valueType": "float",
+				"valueDefault": 1,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "deadBand",
+				"description": "Фильтрация дребезга - определяет порог срабатывания",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "periodic",
+				"description": "Задаёт периодичночть отсчётов в миллисекундах",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/adc_0"
+			},
+			{
+				"name": "dividerMode",
+				"description": "Задаёт режим делителя",
+				"valueType": "enum",
+				"values": [ "5V", "3V3", "10V" ]
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+		]
+	},
+
+	{
+		"mode": "button_led",
+		"description": "\n    Модуль светодиодной кнопки\n",
+		"options": [
+			{
+				"name": "buttonInverse",
+				"description": "Флаг определяет инверсию кнопки\n\t\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "buttonDebounceGap",
+				"description": "Глубина фильтра дребезга\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "longPressTime",
+				"description": "Продолжительность длинного нажатия\n\t\t   Ненулевое значение этого параметра меняет логику обработки кнопки: ввиду того, что для определения \n\t\t   времени нажатия необходимо ожидать отпускание кнопки, информаци о её нажатии будет оправлена \n\t\t   только в момент её отпускания. Если не будет достигнута продолжительность длинного нажатия.\n\t\t",
+				"valueType": "int",
+				"unit": "ms",
+				"valueDefault": 0,
+				"valueMax": 65535,
+				"valueMin": 0
+			},
+			{
+				"name": "doubleClickTime",
+				"description": "Длительность промежутка между нажатиями для регистрации двойного нажатия\n\t\t",
+				"valueType": "int",
+				"unit": "ms",
+				"valueDefault": 0,
+				"valueMax": 65535,
+				"valueMin": 0
+			},
+			{
+				"name": "eventfilter",
+				"description": "Флаг задаёт фильтрацию совытий при активных\n\t\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "buttonTopic",
+				"description": "Топик для событий кнопки\n\t\t\t",
+				"valueType": "string",
+				"valueDefault": "/button_0"
+			},
+			{
+				"name": "ledInverse",
+				"description": "Флаг определяет инверсию светодиода\n\t\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "increment",
+				"description": "Интенсивность затухание свечения\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальное свечение\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальное свечение\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 40,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "ledMode",
+				"description": "Задаёт режим анимации",
+				"valueType": "enum",
+				"values": [ "none", "flash", "glitch" ]
+			},
+			{
+				"name": "ledTopic",
+				"description": "Топик для режима свечения\n\t\t\t",
+				"valueType": "string",
+				"valueDefault": "/led_0"
+			}
+		],
+		"reports": [
+			{
+				"description": "Возвращает состояние нажатия кнопки\n\t",
+				"valueType": "int",
+				"unit": "unit",
+				"topic": "nil"
+			},
+			{
+				"description": "Возвращает состояние длинного нажатия кнопки\n\t",
+				"valueType": "int",
+				"unit": "unit",
+				"topic": "longpress"
+			},
+			{
+				"description": "Возвращает состояние двойного нажатия кнопки\n\t",
+				"valueType": "int",
+				"unit": "unit",
+				"topic": "doubleClick"
+			}
+		],
+		"commands": [
+			{
+				"command": "NULL",
+				"description": "Числовое значение.\n       задаёт текущее состояние светодиода (вкл/выкл)\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			}
+		]
+	},
+
+	{
+		"mode": "encoderPPM",
+		"description": "\n\tМодуль энкодера с фазово импульсной модуляцией(PPM)\n",
+		"options": [
+			{
+				"name": "absolute",
+				"description": "Флаг определяет абслютный режим работы энкодера, \n\t\t\tиначе - инкрементальный\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "floatOutput",
+				"description": "Флаг определяет значение с плавающей точкой,\n\t\t   иначе - целочисленное\n\t\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "dirInverse",
+				"description": "Флаг задаёт инверсию направления",
+				"valueType": "flag"
+			},
+			{
+				"name": "zeroShift",
+				"description": "Значение смещения нуля\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "calibration",
+				"description": "Флаг задаёт необходимость калибровки",
+				"valueType": "flag"
+			},
+			{
+				"name": "filterK",
+				"description": "Флаг задаёт необходимость калибровки",
+				"valueType": "float",
+				"valueDefault": 1,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "deadZone",
+				"description": "Флаг задаёт необходимость калибровки",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "offset",
+				"description": "Флаг задаёт необходимость калибровки",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "pwmMinVal",
+				"description": "Минимальное значение",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "pwmMaxVal",
+				"description": "Максимальное значение",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "refreshRate",
+				"description": "Максимальное значение",
+				"valueType": "int",
+				"unit": "fps",
+				"valueDefault": 20,
+				"valueMax": 100,
+				"valueMin": 1
+			},
+			{
+				"name": "numOfPos",
+				"description": "Количество положений\n\t\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/encoder_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+		]
+	},
+	{
+		"mode": "encoderInc",
+		"description": "\n\tМодуль для работы с инкрементальными энкодерами, обычно оптический.\n",
+		"options": [
+			{
+				"name": "absolute",
+				"description": "Флаг определяет абслютный режим работы энкодера, \n\t\tПо умолчанию  - инкрементальный\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "floatOutput",
+				"description": "Флаг настраивает выходные значения в виде числа с плавающей точкой от 0.0 до 1.0 \n\t\tпо умолчания - целочисленное\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "dirInverse",
+				"description": "Флаг задаёт инверсию направления",
+				"valueType": "flag"
+			},
+			{
+				"name": "linearCounter",
+				"description": "Флаг, режим работы энкода в виде линейного счетчика при достижении максимального и минимальных значений счет будет остановлен, \n\t\tПо умолчанию - счетчик работает в зациклен, и при достижении минимального значения переходит с камсимальному и на оборот\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "glitchFilter",
+				"description": "Значение аппаратного фильтра\n\t\t- еденицы измерения наносекунды\n\t",
+				"valueType": "int",
+				"unit": "ns",
+				"valueDefault": 800,
+				"valueMax": 4095,
+				"valueMin": 1
+			},
+			{
+				"name": "zeroShift",
+				"description": "Значение смещения нуля после делителя\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "minVal",
+				"description": "Минимальное значение",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "maxVal",
+				"description": "Максимальное значение\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 4096,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период проверки значений\n\t\t- еденицы измерения раз в секунду\n\t",
+				"valueType": "int",
+				"unit": "fps",
+				"valueDefault": 20,
+				"valueMax": 100,
+				"valueMin": 1
+			},
+			{
+				"name": "divider",
+				"description": "Делитель",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 4,
+				"valueMax": 0,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/encoder_0"
+			}
+		],
+		"reports": [
+			{
+				"description": "Рапортует текущее значение\n\t",
+				"valueType": "string",
+				"unit": "",
+				"topic": ""
+			}
+		],
+		"commands": [
+			{
+				"command": "reset",
+				"description": "Обнуляет счетчик\n",
+				"parametersType": "types",
+				"parameters": [ " " ]
+			}
+		]
+	},
+	{
+		"mode": "encoderAS5600",
+		"description": "\n\tМодуль для работы с инкрементальными энкодерами, обычно оптический.\n",
+		"options": [
+			{
+				"name": "absolute",
+				"description": "Флаг определяет абслютный режим работы энкодера, \n\t\tПо умолчанию  - инкрементальный\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "floatOutput",
+				"description": "Флаг натраивает выходные значения в виде числа с плавающей точкой,\n\t\tиначе - целочисленное\n\t",
+				"valueType": "flag"
+			},
+			{
+				"name": "dirInverse",
+				"description": "Флаг задаёт инверсию направления",
+				"valueType": "flag"
+			},
+			{
+				"name": "deadZone",
+				"description": "Значение зоны не чуствительности\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "zeroShift",
+				"description": "Значение смещения нуля после делителя\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "filterK",
+				"description": "Значение смещения нуля после делителя\n\t",
+				"valueType": "float",
+				"valueDefault": 1,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "minVal",
+				"description": "Минимальное значение",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "maxVal",
+				"description": "Максимальное значение\n\t",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 4096,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период проверки значений\n\t\t- еденицы измерения раз в секунду\n\t",
+				"valueType": "int",
+				"unit": "fps",
+				"valueDefault": 20,
+				"valueMax": 100,
+				"valueMin": 1
+			},
+			{
+				"name": "divider",
+				"description": "Делитель",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 4,
+				"valueMax": 0,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/encoder_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+		]
+	},
+
+	{
+		"mode": "button_smartLed",
+		"description": "\n    Модуль поддержки Smart-LED\n",
+		"options": [
+			{
+				"name": "numOfLed",
+				"description": "Количенство светодиодов\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 24,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "ledInverse",
+				"description": "Флаг задаёт инвертирование значений \n",
+				"valueType": "flag"
+			},
+			{
+				"name": "defaultState",
+				"description": "Состояние по умолчанию\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 1,
+				"valueMin": 0
+			},
+			{
+				"name": "increment",
+				"description": "Величина приращения\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления \n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 1000,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "RGBcolor",
+				"description": "Начальный цвет\n",
+				"valueType": "color",
+				"valueDefault": "0 0 255"
+			},
+			{
+				"name": "ledMode",
+				"description": "Задаёт режим анимации",
+				"valueType": "enum",
+				"values": [ "default", "flash", "glitch", "swiper", "rainbow", "run" ]
+			},
+			{
+				"name": "ledTopic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/smartLed_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "NULL",
+				"description": "Числовое значение.\n       задаёт текущее состояние светодиода (вкл/выкл)\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setRGB",
+				"description": "Установить новый целевой цвет. \n       Цвет задаётся десятичными значениями R G B через пробел\n",
+				"parametersType": "types",
+				"parameters": [ "int ", "int ", "int " ]
+			},
+			{
+				"command": "setMode",
+				"description": "Установить новый режим анимации цветов\n",
+				"parametersType": "enum",
+				"parameters": [ "default", "flash", "glitch", "swiper", "rainbow", "run" ]
+			},
+			{
+				"command": "setIncrement",
+				"description": "Установить новое значение приращения\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			}
+		]
+	},
+	{
+		"mode": "button_swiperLed",
+		"description": "\n   Модуль поддержки SWIPER LED\n",
+		"options": [
+			{
+				"name": "numOfLed",
+				"description": "Количенство светодиодов\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 16,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления \n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 25,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "RGBcolor",
+				"description": "Начальный цвет\n",
+				"valueType": "color",
+				"valueDefault": "0 0 255"
+			},
+			{
+				"name": "ledTopic",
+				"description": "Начальный цвет\n",
+				"valueType": "string",
+				"valueDefault": "/swiperLed_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "swipe",
+				"description": "Анимация эфекта\n",
+				"parametersType": "enum",
+				"parameters": [ "up", "down", "left", "right" ]
+			}
+		]
+	},
+	{
+		"mode": "button_ledRing",
+		"description": "\n    Модуль поддержки светового кольца\n",
+		"options": [
+			{
+				"name": "numOfLed",
+				"description": "Количенство светодиодов\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 24,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "increment",
+				"description": "Величина приращения\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления \n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 30,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "numOfPos",
+				"description": "Количество позиций\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "effectLen",
+				"description": "Длинна эффекта\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "defaultState",
+				"description": "Состояние по умолчанию\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 1,
+				"valueMin": 0
+			},
+			{
+				"name": "dirInverse",
+				"description": "Инверсия направления эффекта\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "offset",
+				"description": "Смещение эффекта\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "ledMode",
+				"description": "Задаёт режим анимации",
+				"valueType": "enum",
+				"values": [ "default", "flash", "glitch", "swiper", "rainbow", "run" ]
+			},
+			{
+				"name": "RGBcolor",
+				"description": "Начальный цвет\n",
+				"valueType": "color",
+				"valueDefault": "0 0 255"
+			},
+			{
+				"name": "ledTopic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/ledRing_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "NULL",
+				"description": "Числовое значение.\n       задаёт текущее состояние светодиода (вкл/выкл)\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setRGB",
+				"description": "Установить новый целевой цвет. \n       Цвет задаётся десятичными значениями R G B через пробел\n",
+				"parametersType": "types",
+				"parameters": [ "int ", "int ", "int " ]
+			},
+			{
+				"command": "setPos",
+				"description": "Установить новую текущую позичию\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "setPos",
+				"description": "Установить новую текущую позичию\n",
+				"parametersType": "types",
+				"parameters": [ "string " ]
+			}
+		]
+	},
+	{
+		"mode": "button_ledBar",
+		"description": "\n    Модуль поддержки светового блока\n",
+		"options": [
+			{
+				"name": "numOfLed",
+				"description": "Количенство светодиодов\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 24,
+				"valueMax": 1024,
+				"valueMin": 1
+			},
+			{
+				"name": "increment",
+				"description": "Величина приращения\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 255,
+				"valueMin": 0
+			},
+			{
+				"name": "maxBright",
+				"description": "Максимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 255,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "minBright",
+				"description": "Минимальное значение яркости\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4095,
+				"valueMin": 0
+			},
+			{
+				"name": "refreshRate",
+				"description": "Период обновления \n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 1000,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "numOfPos",
+				"description": "Количество позиций\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 4096,
+				"valueMin": 1
+			},
+			{
+				"name": "defaultState",
+				"description": "Состояние по умолчанию\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 1,
+				"valueMin": 0
+			},
+			{
+				"name": "dirInverse",
+				"description": "Инверсия направления эффекта\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "offset",
+				"description": "Смещение эффекта\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "RGBcolor",
+				"description": "Начальный цвет\n",
+				"valueType": "color",
+				"valueDefault": "0 0 255"
+			},
+			{
+				"name": "ledTopic",
+				"description": "Определяет топик для MQTT сообщений",
+				"valueType": "string",
+				"valueDefault": "/ledBar_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "setRGB",
+				"description": "Установить новый целевой цвет. \n       Цвет задаётся десятичными значениями R G B через пробел\n",
+				"parametersType": "types",
+				"parameters": [ "int ", "int ", "int " ]
+			},
+			{
+				"command": "setPos",
+				"description": "Установить новую текущую позичию\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			}
+		]
+	},
+
+	{
+		"mode": "counter",
+		"description": "\n    Виртуальный модуль счетчик\n",
+		"options": [
+			{
+				"name": "maxVal",
+				"description": "Максимальное значение счетчика.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "minVal",
+				"description": "Минимальное значение счетчика.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "threshold",
+				"description": "Пороговое значение счетчика.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "circularCounter",
+				"description": "Сброс к противоположному значению при переполнении счетчика.\n",
+				"valueType": "flag"
+			},
+			{
+				"name": "topic",
+				"description": "Не cтандартный топик для таймера\n",
+				"valueType": "string",
+				"valueDefault": "/counter_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "set",
+				"description": "Установка значений счетчика\n       Параметр может быть задан инкрментально или обсалютно\n",
+				"parametersType": "types",
+				"parameters": [ "string " ]
+			}
+		]
+	},
+	{
+		"mode": "random",
+		"description": "\n    Модуль для генерации случайных чисел\n",
+		"options": [
+			{
+				"name": "maxVal",
+				"description": "\n            Максимальное значение.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "minVal",
+				"description": "Минимальное значение.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 0,
+				"valueMax": 0,
+				"valueMin": 0
+			},
+			{
+				"name": "topic",
+				"description": "Не cтандартный топик для таймера\n",
+				"valueType": "string",
+				"valueDefault": "/random_0"
+			}
+		],
+		"reports": [
+			{
+				"description": "Возвращает сгенерированное значение\n\n\t",
+				"valueType": "int",
+				"unit": "",
+				"topic": ""
+			}
+		],
+		"commands": [
+			{
+				"command": "generate",
+				"description": "Запуск генератора случайных чисел\n",
+				"parametersType": "types",
+				"parameters": [ " " ]
+			}
+		]
+	},
+	{
+		"mode": "timer",
+		"description": "\n    Виртуальный модуль таймер\n",
+		"options": [
+			{
+				"name": "time",
+				"description": "Число, время через которе сработает таймер. Еденицы измерения мс.\n",
+				"valueType": "int",
+				"unit": "",
+				"valueDefault": 10,
+				"valueMax": 0,
+				"valueMin": 1
+			},
+			{
+				"name": "topic",
+				"description": "Не cтандартный топик для таймера\n",
+				"valueType": "string",
+				"valueDefault": "/timer_0"
+			}
+		],
+		"reports": [
+		],
+		"commands": [
+			{
+				"command": "start",
+				"description": "Запустить таймер\n        Опционально - время таймера, если параметр не задан или равен 0 будет использован параметр заданный в опциях\n",
+				"parametersType": "types",
+				"parameters": [ "int " ]
+			},
+			{
+				"command": "stop",
+				"description": "Сброс таймер\n",
+				"parametersType": "types",
+				"parameters": [ " " ]
+			}
+		]
+	},
+	{
+		"mode": "whitelist",
+		"description": "\n    Программный модуль для размещения связей во внешнем файле. Виртуальный слот, не взаимодействует с аппаратной частью.\n",
+		"options": [
+			{
+				"name": "filename",
+				"description": "\n            Имя файла со списком. По умолчанию whitelist.txt.\n",
+				"valueType": "string",
+				"valueDefault": ""
+			},
+			{
+				"name": "topic",
+				"description": "Не cтандартный топик для таймера\n",
+				"valueType": "string",
+				"valueDefault": "/whitelist_0"
+			}
+		],
+		"reports": [
+			{
+				"description": "Возвращает если совпадений не найдено\n\t",
+				"valueType": "int",
+				"unit": "",
+				"topic": "noMatches"
+			}
+		],
+		"commands": [
+			{
+				"command": "check",
+				"description": "Запуск проверки\n",
+				"parametersType": "types",
+				"parameters": [ "string " ]
+			}
+		]
+	}
+]
+}
