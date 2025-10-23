@@ -1426,19 +1426,37 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  /// Get mode suggestions from manifest modes array
+  /// Get mode suggestions from manifest modes array, filtered by slots field
   List<String> _getModeSuggestionsFromManifest() {
     final List<String> modeSuggestions = <String>[];
     
     try {
+      // Get current slot number from context
+      String? currentSlotNumber;
+      String? currentChapter = _getCurrentChapterFromTextEditor();
+      
+      if (currentChapter != null && currentChapter.startsWith('SLOT_')) {
+        currentSlotNumber = _extractSlotNumber(currentChapter);
+      }
+      
       if (_manifestData.isNotEmpty && _manifestData.containsKey('modes') && _manifestData['modes'] is List) {
         final List<dynamic> modesArray = _manifestData['modes'] as List<dynamic>;
         
         for (final dynamic modeItem in modesArray) {
           if (modeItem is Map<String, dynamic>) {
             final String? modeValue = modeItem['mode']?.toString();
+            final String? slotsField = modeItem['slots']?.toString();
+            
             if (modeValue != null && modeValue.isNotEmpty) {
-              modeSuggestions.add(modeValue);
+              // If we have a current slot number, check if this mode supports it
+              if (currentSlotNumber != null && slotsField != null && slotsField.isNotEmpty) {
+                if (_isSlotValidForMode(currentSlotNumber, slotsField)) {
+                  modeSuggestions.add(modeValue);
+                }
+              } else {
+                // If no current slot context or no slots field, include all modes
+                modeSuggestions.add(modeValue);
+              }
             }
           }
         }
@@ -1449,6 +1467,41 @@ class _HomePageState extends State<HomePage> {
     
     return modeSuggestions;
   }
+
+  /// Check if a slot number is valid for a mode based on its slots field
+  /// Supports formats like "0-5", "1", "6-11", "0,2,4", etc.
+  bool _isSlotValidForMode(String slotNumber, String slotsField) {
+    try {
+      final int slot = int.parse(slotNumber);
+      
+      // Handle range format like "0-5", "6-11"
+      if (slotsField.contains('-')) {
+        final List<String> rangeParts = slotsField.split('-');
+        if (rangeParts.length == 2) {
+          final int? start = int.tryParse(rangeParts[0].trim());
+          final int? end = int.tryParse(rangeParts[1].trim());
+          if (start != null && end != null) {
+            return slot >= start && slot <= end;
+          }
+        }
+      }
+      
+      // Handle comma-separated format like "0,2,4" or single number like "1"
+      final List<String> slotNumbers = slotsField.split(',');
+      for (final String slotStr in slotNumbers) {
+        final int? slotValue = int.tryParse(slotStr.trim());
+        if (slotValue != null && slotValue == slot) {
+          return true;
+        }
+      }
+      
+      return false;
+    } catch (e) {
+      // If parsing fails, assume the mode is valid (fallback behavior)
+      return true;
+    }
+  }
+
 
   /// Determine the current chapter from the text editor context
   /// by looking at the text around the cursor position
