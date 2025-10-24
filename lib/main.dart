@@ -211,6 +211,8 @@ class _HomePageState extends State<HomePage> {
     
     final String word = text.substring(start, end);
     _log('DEBUG: Word detected: "$word", length: ${word.length}');
+    _log('DEBUG: Text before cursor: "${text.substring(0, cursorPos)}"');
+    _log('DEBUG: Start: $start, End: $end, Cursor: $cursorPos');
     
     if (word.length >= 2) {
       final List<String> suggestions = _getAutocompleteSuggestions(word);
@@ -1049,9 +1051,36 @@ class _HomePageState extends State<HomePage> {
     }
     // Special handling for cross_link= parameter - step by step rule construction
     else if (lowerWord.startsWith('cross_link=') || lowerWord == 'cross_link') {
-      final List<String> crossLinkSuggestions = _getCrossLinkStepByStepSuggestions(lowerWord);
-      for (final String suggestion in crossLinkSuggestions) {
-        suggestions.add(suggestion);
+      _log('DEBUG: Cross_link= logic triggered for: $lowerWord');
+      
+      if (lowerWord.startsWith('cross_link=')) {
+        final String crossLinkValue = lowerWord.substring(11); // Remove 'cross_link=' prefix
+        
+        // Handle comma-separated rules - find the last comma to get the current partial rule
+        final int lastCommaIndex = crossLinkValue.lastIndexOf(',');
+        String currentRule = crossLinkValue;
+        String existingRules = '';
+        
+        if (lastCommaIndex >= 0) {
+          existingRules = crossLinkValue.substring(0, lastCommaIndex + 1); // Include the comma
+          currentRule = crossLinkValue.substring(lastCommaIndex + 1).trim();
+          _log('DEBUG: Found comma, existing rules: "$existingRules", current rule: "$currentRule"');
+        }
+        
+        // Get suggestions for the current rule
+        final List<String> crossLinkSuggestions = _getCrossLinkStepByStepSuggestions('cross_link=$currentRule');
+        _log('DEBUG: Got ${crossLinkSuggestions.length} cross_link suggestions for current rule');
+        
+        for (final String suggestion in crossLinkSuggestions) {
+          suggestions.add(suggestion);
+          _log('DEBUG: Added cross_link suggestion: "$suggestion"');
+        }
+      } else {
+        // No cross_link= prefix, show source slots
+        final List<String> sourceSlots = _getTopicBasedSourceSlots();
+        for (final String slot in sourceSlots) {
+          suggestions.add(slot);
+        }
       }
     }
     // Special handling for options= parameter - get option values from manifest based on current mode
@@ -1526,45 +1555,56 @@ class _HomePageState extends State<HomePage> {
         replacementEnd = end;
       }
     } else if (currentWord.startsWith('cross_link=')) {
-      // For cross_link= suggestions, handle step-by-step construction
+      // For cross_link= suggestions, handle step-by-step construction with comma support
       final String currentCrossLinkValue = currentWord.substring(11); // Remove "cross_link=" prefix
-      final CrossLinkStepType stepType = _parseCrossLinkStep(currentCrossLinkValue);
+      
+      // Handle comma-separated rules - find the last comma to get the current partial rule
+      final int lastCommaIndex = currentCrossLinkValue.lastIndexOf(',');
+      String currentRule = currentCrossLinkValue;
+      String existingRules = '';
+      
+      if (lastCommaIndex >= 0) {
+        existingRules = currentCrossLinkValue.substring(0, lastCommaIndex + 1); // Include the comma
+        currentRule = currentCrossLinkValue.substring(lastCommaIndex + 1).trim();
+      }
+      
+      final CrossLinkStepType stepType = _parseCrossLinkStep(currentRule);
       
       if (stepType == CrossLinkStepType.sourceSlot) {
-        // Step 1: Replace the entire cross_link value with the source slot
-        replacementText = suggestion;
+        // Step 1: Replace the current rule with the source slot
+        replacementText = existingRules + suggestion;
         replacementStart = start + 11; // Start after "cross_link="
         replacementEnd = end;
       } else if (stepType == CrossLinkStepType.sourceReport) {
         // Step 2: Add source report after source slot with /
-        final String sourceSlot = _extractSourceSlotFromCrossLink(currentCrossLinkValue);
-        replacementText = '$sourceSlot/$suggestion';
+        final String sourceSlot = _extractSourceSlotFromCrossLink(currentRule);
+        replacementText = existingRules + '$sourceSlot/$suggestion';
         replacementStart = start + 11; // Start after "cross_link="
         replacementEnd = end;
       } else if (stepType == CrossLinkStepType.sourceValue) {
         // Step 3: Add source value after source report with :
-        final String sourcePart = currentCrossLinkValue.split('->')[0];
-        replacementText = '$sourcePart:$suggestion';
+        final String sourcePart = currentRule.split('->')[0];
+        replacementText = existingRules + '$sourcePart:$suggestion';
         replacementStart = start + 11; // Start after "cross_link="
         replacementEnd = end;
       } else if (stepType == CrossLinkStepType.targetSlot) {
         // Step 4: Add target slot after source part with ->
-        final String sourcePart = currentCrossLinkValue.split('->')[0];
-        replacementText = '$sourcePart->$suggestion';
+        final String sourcePart = currentRule.split('->')[0];
+        replacementText = existingRules + '$sourcePart->$suggestion';
         replacementStart = start + 11; // Start after "cross_link="
         replacementEnd = end;
       } else if (stepType == CrossLinkStepType.targetCommand) {
-        // Step 5: Add target command after target slot with :
-        final String targetSlot = _extractTargetSlotFromCrossLink(currentCrossLinkValue);
-        final String sourcePart = currentCrossLinkValue.split('->')[0];
-        replacementText = '$sourcePart->$targetSlot:$suggestion';
+        // Step 5: Add target command after target slot with /
+        final String targetSlot = _extractTargetSlotFromCrossLink(currentRule);
+        final String sourcePart = currentRule.split('->')[0];
+        replacementText = existingRules + '$sourcePart->$targetSlot/$suggestion';
         replacementStart = start + 11; // Start after "cross_link="
         replacementEnd = end;
       } else if (stepType == CrossLinkStepType.targetValue) {
         // Step 6: Add target value after target command with =
-        final String targetPart = currentCrossLinkValue.split('->')[1];
-        final String sourcePart = currentCrossLinkValue.split('->')[0];
-        replacementText = '$sourcePart->$targetPart=$suggestion';
+        final String targetPart = currentRule.split('->')[1];
+        final String sourcePart = currentRule.split('->')[0];
+        replacementText = existingRules + '$sourcePart->$targetPart=$suggestion';
         replacementStart = start + 11; // Start after "cross_link="
         replacementEnd = end;
       }
@@ -3370,6 +3410,7 @@ class _HomePageState extends State<HomePage> {
   /// Get step-by-step cross link suggestions based on current input
   List<String> _getCrossLinkStepByStepSuggestions(String currentInput) {
     final List<String> suggestions = <String>[];
+    _log('DEBUG: _getCrossLinkStepByStepSuggestions called with: "$currentInput"');
     
     if (currentInput == 'cross_link') {
       // Step 1: Show source slots
@@ -3379,7 +3420,9 @@ class _HomePageState extends State<HomePage> {
       }
     } else if (currentInput.startsWith('cross_link=')) {
       final String crossLinkValue = currentInput.substring(11); // Remove 'cross_link=' prefix
+      _log('DEBUG: Cross link value: "$crossLinkValue"');
       final CrossLinkStepType stepType = _parseCrossLinkStep(crossLinkValue);
+      _log('DEBUG: Detected step type: $stepType');
       
       switch (stepType) {
         case CrossLinkStepType.sourceSlot:
@@ -3397,17 +3440,24 @@ class _HomePageState extends State<HomePage> {
           
         case CrossLinkStepType.sourceReport:
           // Step 2: Show source reports
-          final List<String> reports = _getReportTopicsForCurrentMode();
+          _log('DEBUG: Processing source report step - TRIGGERED BY / TYPING');
+          final String sourceSlot = _extractSourceSlotFromCrossLink(crossLinkValue);
+          _log('DEBUG: Source slot extracted: "$sourceSlot"');
+          final List<String> reports = _getReportTopicsForSourceSlot(sourceSlot);
+          _log('DEBUG: Found ${reports.length} reports for source slot "$sourceSlot"');
           final String filterText = _extractFilterTextAfterSlash(crossLinkValue);
+          _log('DEBUG: Filter text after slash: "$filterText"');
           
           for (final String report in reports) {
             if (report.isNotEmpty && (filterText.isEmpty || report.toLowerCase().contains(filterText.toLowerCase()))) {
               // Don't suggest if it exactly matches what's already typed
               if (filterText.isEmpty || report.toLowerCase() != filterText.toLowerCase()) {
                 suggestions.add(report);
+                _log('DEBUG: Added source report suggestion: "$report"');
               }
             }
           }
+          _log('DEBUG: Total source report suggestions: ${suggestions.length}');
           break;
           
         case CrossLinkStepType.sourceValue:
@@ -3476,18 +3526,29 @@ class _HomePageState extends State<HomePage> {
 
   /// Parse cross link step to determine current step type
   CrossLinkStepType _parseCrossLinkStep(String crossLinkValue) {
+    _log('DEBUG: _parseCrossLinkStep called with: "$crossLinkValue"');
+    
     if (crossLinkValue.isEmpty) {
+      _log('DEBUG: Empty cross link value, returning sourceSlot');
       return CrossLinkStepType.sourceSlot;
     }
     
     // Check if we have source slot and looking for source report
     if (crossLinkValue.contains('/') && !crossLinkValue.contains('->')) {
+      _log('DEBUG: Found / without ->, returning sourceReport');
       return CrossLinkStepType.sourceReport;
     }
     
     // Check if user just typed "/" after source slot - trigger source report selection
     if (crossLinkValue.endsWith('/')) {
-      return CrossLinkStepType.sourceReport;
+      // Check if we're in the source part (before ->) or target part (after ->)
+      if (crossLinkValue.contains('->')) {
+        _log('DEBUG: Ends with / after ->, returning targetCommand - TRIGGERED BY / TYPING');
+        return CrossLinkStepType.targetCommand;
+      } else {
+        _log('DEBUG: Ends with / before ->, returning sourceReport - TRIGGERED BY / TYPING');
+        return CrossLinkStepType.sourceReport;
+      }
     }
     
     // Check if we have source part and looking for target slot
@@ -3499,7 +3560,7 @@ class _HomePageState extends State<HomePage> {
         final String targetPart = parts[1];
         if (targetPart.isEmpty) {
           return CrossLinkStepType.targetSlot;
-        } else if (!targetPart.contains(':')) {
+        } else if (!targetPart.contains('/')) {
           return CrossLinkStepType.targetCommand;
         } else {
           return CrossLinkStepType.targetValue;
@@ -3534,8 +3595,8 @@ class _HomePageState extends State<HomePage> {
       final List<String> parts = crossLinkValue.split('->');
       if (parts.length >= 2) {
         final String targetPart = parts[1];
-        if (targetPart.contains(':')) {
-          return targetPart.split(':')[0];
+        if (targetPart.contains('/')) {
+          return targetPart.split('/')[0];
         }
         return targetPart;
       }
@@ -3582,8 +3643,8 @@ class _HomePageState extends State<HomePage> {
       final List<String> parts = crossLinkValue.split('->');
       if (parts.length >= 2) {
         final String targetPart = parts[1];
-        if (targetPart.contains(':')) {
-          final List<String> targetParts = targetPart.split(':');
+        if (targetPart.contains('/')) {
+          final List<String> targetParts = targetPart.split('/');
           if (targetParts.length >= 2) {
             return targetParts[1];
           }
@@ -3619,15 +3680,82 @@ class _HomePageState extends State<HomePage> {
     reportTopics.add('');
     
     try {
-      if (_manifestData.isEmpty || _selectedChapter == null) {
+      if (_manifestData.isEmpty) {
+        _log('DEBUG: Manifest data is empty');
         return reportTopics;
       }
       
-      // Get the mode for the currently selected chapter
-      final String? modeValue = _parsedConfig[_selectedChapter!]?['mode'];
-      if (modeValue == null || modeValue.isEmpty) {
+      // Get the current chapter from the text editor context
+      final String? currentChapter = _getCurrentChapterFromTextEditor();
+      _log('DEBUG: Current chapter from text editor: "$currentChapter"');
+      if (currentChapter == null) {
+        _log('DEBUG: No current chapter found');
         return reportTopics;
       }
+      
+      // Get the mode for the current chapter from text editor
+      final String? modeValue = _parsedConfig[currentChapter]?['mode'];
+      _log('DEBUG: Mode value for chapter "$currentChapter": "$modeValue"');
+      if (modeValue == null || modeValue.isEmpty) {
+        _log('DEBUG: No mode value found for current chapter');
+        return reportTopics;
+      }
+      
+      if (_manifestData.containsKey('modes') && _manifestData['modes'] is List) {
+        final List<dynamic> modesArray = _manifestData['modes'] as List<dynamic>;
+        _log('DEBUG: Found ${modesArray.length} modes in manifest');
+        
+        for (final dynamic modeItem in modesArray) {
+          if (modeItem is Map<String, dynamic>) {
+            final String? modeName = modeItem['mode']?.toString();
+            _log('DEBUG: Checking mode: "$modeName" against "$modeValue"');
+            
+            if (modeName == modeValue && modeItem['reports'] is List) {
+              final List<dynamic> reportsArray = modeItem['reports'] as List<dynamic>;
+              _log('DEBUG: Found ${reportsArray.length} reports for mode "$modeName"');
+              
+              for (final dynamic report in reportsArray) {
+                if (report is Map<String, dynamic>) {
+                  final String? topic = report['topic']?.toString();
+                  if (topic != null && topic.isNotEmpty) {
+                    reportTopics.add(topic);
+                    _log('DEBUG: Added report topic: "$topic"');
+                  }
+                }
+              }
+              _log('DEBUG: Total report topics found: ${reportTopics.length}');
+              break; // Found the mode, no need to continue
+            }
+          }
+        }
+      } else {
+        _log('DEBUG: No modes array found in manifest data');
+      }
+    } catch (e) {
+      _log('DEBUG: Error in _getReportTopicsForCurrentMode: $e');
+    }
+    
+    return reportTopics;
+  }
+
+  /// Get report topics from manifest.json for a specific source slot's mode
+  List<String> _getReportTopicsForSourceSlot(String sourceSlot) {
+    final List<String> reportTopics = <String>[];
+    
+    // Add empty string as first option
+    reportTopics.add('');
+    
+    try {
+      if (_manifestData.isEmpty) {
+        _log('DEBUG: Manifest data is empty');
+        return reportTopics;
+      }
+      
+      _log('DEBUG: Getting reports for source slot: "$sourceSlot"');
+      
+      // Search for the source slot in mode options where name="topic"
+      String? sourceSlotMode;
+      _log('DEBUG: Searching in mode options for topic "$sourceSlot"');
       
       if (_manifestData.containsKey('modes') && _manifestData['modes'] is List) {
         final List<dynamic> modesArray = _manifestData['modes'] as List<dynamic>;
@@ -3635,25 +3763,68 @@ class _HomePageState extends State<HomePage> {
         for (final dynamic modeItem in modesArray) {
           if (modeItem is Map<String, dynamic>) {
             final String? modeName = modeItem['mode']?.toString();
+            if (modeItem['options'] is List) {
+              final List<dynamic> optionsArray = modeItem['options'] as List<dynamic>;
+              
+              for (final dynamic option in optionsArray) {
+                if (option is Map<String, dynamic>) {
+                  final String? optionName = option['name']?.toString();
+                  final String? valueDefault = option['valueDefault']?.toString();
+                  
+                  // Check both "player_0" and "/player_0" formats
+                  if (optionName == 'topic' && 
+                      (valueDefault == sourceSlot || valueDefault == '/$sourceSlot')) {
+                    sourceSlotMode = modeName;
+                    _log('DEBUG: Found topic "$sourceSlot" in mode "$modeName" with valueDefault "$valueDefault"');
+                    break;
+                  }
+                }
+              }
+              if (sourceSlotMode != null) break;
+            }
+          }
+        }
+      }
+      
+      _log('DEBUG: Mode for source slot "$sourceSlot": "$sourceSlotMode"');
+      
+      if (sourceSlotMode == null || sourceSlotMode.isEmpty) {
+        _log('DEBUG: No mode found for source slot "$sourceSlot"');
+        return reportTopics;
+      }
+      
+      if (_manifestData.containsKey('modes') && _manifestData['modes'] is List) {
+        final List<dynamic> modesArray = _manifestData['modes'] as List<dynamic>;
+        _log('DEBUG: Found ${modesArray.length} modes in manifest');
+        
+        for (final dynamic modeItem in modesArray) {
+          if (modeItem is Map<String, dynamic>) {
+            final String? modeName = modeItem['mode']?.toString();
+            _log('DEBUG: Checking mode: "$modeName" against source slot mode "$sourceSlotMode"');
             
-            if (modeName == modeValue && modeItem['reports'] is List) {
+            if (modeName == sourceSlotMode && modeItem['reports'] is List) {
               final List<dynamic> reportsArray = modeItem['reports'] as List<dynamic>;
+              _log('DEBUG: Found ${reportsArray.length} reports for source slot mode "$modeName"');
               
               for (final dynamic report in reportsArray) {
                 if (report is Map<String, dynamic>) {
                   final String? topic = report['topic']?.toString();
                   if (topic != null && topic.isNotEmpty) {
                     reportTopics.add(topic);
+                    _log('DEBUG: Added report topic for source slot: "$topic"');
                   }
                 }
               }
+              _log('DEBUG: Total report topics found for source slot: ${reportTopics.length}');
               break; // Found the mode, no need to continue
             }
           }
         }
+      } else {
+        _log('DEBUG: No modes array found in manifest data');
       }
     } catch (e) {
-      // Silent error handling
+      _log('DEBUG: Error in _getReportTopicsForSourceSlot: $e');
     }
     
     return reportTopics;
