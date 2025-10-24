@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_libserialport/flutter_libserialport.dart';
 import 'package:ftpconnect/ftpconnect.dart';
 import 'package:flutter/services.dart';
@@ -57,13 +58,21 @@ class _HomePageState extends State<HomePage> {
   final ScrollController _logsScrollController = ScrollController();
   final ScrollController _suggestionScrollController = ScrollController();
   final TextEditingController _configEditorController = TextEditingController();
+  final FocusNode _configEditorFocusNode = FocusNode();
+  final ScrollController _textEditorScrollController = ScrollController();
   Timer? _autocompleteTimer;
+  Timer? _overlayTimer;
   String _lastText = '';
   List<String> _cachedSuggestions = [];
   String? _currentWord;
   List<String> _currentSuggestions = [];
   OverlayEntry? _suggestionOverlay;
   int _selectedSuggestionIndex = -1;
+  bool _isRebuilding = false;
+  bool _isLayoutInProgress = false;
+  double _debugScrollOffset = 0.0;
+  double _debugPopupY = 0.0;
+  double _debugCursorY = 0.0;
   // Cached files loaded from removable drives when serial device is selected
   String? _cachedManifestContent; // TODO: Use for device manifest display
   String? _cachedConfigContent;
@@ -122,12 +131,48 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _setupAutocompleteListener();
+    _setupScrollListener();
     _startScan();
+  }
+
+  /// Setup scroll listener for debug scroll offset tracking
+  void _setupScrollListener() {
+    _textEditorScrollController.addListener(_updateDebugScrollOffset);
+  }
+
+  @override
+  void setState(VoidCallback fn) {
+    _isRebuilding = true;
+    super.setState(fn);
+    _isRebuilding = false;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _isLayoutInProgress = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _isLayoutInProgress = false;
+    });
+  }
+
+  /// Update debug scroll offset value
+  void _updateDebugScrollOffset() {
+    if (mounted) {
+      setState(() {
+        _debugScrollOffset = _textEditorScrollController.hasClients 
+            ? _textEditorScrollController.position.pixels 
+            : 0.0;
+      });
+    }
   }
 
   /// Setup autocomplete listener for text changes
   void _setupAutocompleteListener() {
     _configEditorController.addListener(() {
+      // Safety check to prevent assertion failures during widget rebuilds
+      if (!mounted) return;
+      
       final String currentText = _configEditorController.text;
       if (currentText != _lastText) {
         _lastText = currentText;
@@ -145,15 +190,20 @@ class _HomePageState extends State<HomePage> {
 
   /// Update autocomplete suggestions based on current text
   void _updateAutocompleteSuggestions() {
+    // Safety check to prevent assertion failures during widget rebuilds
+    if (!mounted) return;
+    
     final String text = _configEditorController.text;
     final int cursorPos = _configEditorController.selection.baseOffset;
     
     if (cursorPos <= 0 || text.isEmpty) {
       _hideSuggestionOverlay();
-      setState(() {
-        _currentWord = null;
-        _currentSuggestions = [];
-      });
+      if (mounted) {
+        setState(() {
+          _currentWord = null;
+          _currentSuggestions = [];
+        });
+      }
       return;
     }
 
@@ -174,19 +224,34 @@ class _HomePageState extends State<HomePage> {
     
     if (word.length >= 2) {
       final List<String> suggestions = _getAutocompleteSuggestions(word);
-      setState(() {
-        _currentWord = word;
-        _currentSuggestions = suggestions;
-        _selectedSuggestionIndex = -1; // Reset selection when text changes
+      if (mounted) {
+        setState(() {
+          _currentWord = word;
+          _currentSuggestions = suggestions;
+          _selectedSuggestionIndex = -1; // Reset selection when text changes
+        });
+      }
+      // Delay overlay creation to avoid assertion failures during rebuilds
+      _overlayTimer?.cancel();
+      _overlayTimer = Timer(const Duration(milliseconds: 100), () {
+        if (mounted && !_isRebuilding && !_isLayoutInProgress) {
+          // Use SchedulerBinding to ensure we're in the right phase
+          SchedulerBinding.instance.addPostFrameCallback((_) {
+            if (mounted && !_isRebuilding && !_isLayoutInProgress) {
+              _showSuggestionOverlay(suggestions, word);
+            }
+          });
+        }
       });
-      _showSuggestionOverlay(suggestions, word);
     } else {
       _hideSuggestionOverlay();
-      setState(() {
-        _currentWord = null;
-        _currentSuggestions = [];
-        _selectedSuggestionIndex = -1;
-      });
+      if (mounted) {
+        setState(() {
+          _currentWord = null;
+          _currentSuggestions = [];
+          _selectedSuggestionIndex = -1;
+        });
+      }
     }
   }
 
@@ -466,10 +531,12 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: <Widget>[
-          Expanded(
-            child: Row(
+          Column(
+            children: <Widget>[
+              Expanded(
+                child: Row(
               children: <Widget>[
                 SizedBox(
                   width: 320,
@@ -566,7 +633,49 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-    );
+      // Debug view for scroll offset
+      Positioned(
+        top: 10,
+        right: 10,
+        child: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.7),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Scroll: ${_debugScrollOffset.toStringAsFixed(1)}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              Text(
+                'Cursor Y: ${_debugCursorY.toStringAsFixed(1)}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                ),
+              ),
+              Text(
+                'Popup Y: ${_debugPopupY.toStringAsFixed(1)}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ]));
   }
 
   Widget _buildDetailsView() {
@@ -859,19 +968,30 @@ class _HomePageState extends State<HomePage> {
           Expanded(
             child: Focus(
               onKeyEvent: _handleKeyEvent,
-              child: TextField(
-                controller: _configEditorController,
-                maxLines: null,
-                expands: true,
-                style: const TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 12,
-                  height: 1.4,
-                ),
-                decoration: const InputDecoration(
-                  border: InputBorder.none,
-                  contentPadding: EdgeInsets.all(12),
-                  hintText: 'Edit configuration content...',
+              child: Container(
+                constraints: const BoxConstraints(),
+                child: SingleChildScrollView(
+                  controller: _textEditorScrollController,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      minHeight: 200, // Minimum height to prevent infinite constraints
+                    ),
+                    child: TextField(
+                      focusNode: _configEditorFocusNode,
+                      controller: _configEditorController,
+                      maxLines: null,
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
+                      decoration: const InputDecoration(
+                        border: InputBorder.none,
+                        contentPadding: EdgeInsets.all(12),
+                        hintText: 'Edit configuration content...',
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -1133,13 +1253,112 @@ class _HomePageState extends State<HomePage> {
     
     if (suggestions.isEmpty) return;
     
+    // Safety check to prevent assertion failures
+    if (!mounted || _isRebuilding || _isLayoutInProgress) return;
+    
     final Size screenSize = MediaQuery.of(context).size;
     
-    // Calculate position for the suggestion popup
+    // Calculate actual popup dimensions
     final double popupWidth = 300.0;
     final double popupHeight = (suggestions.length * 40.0).clamp(80.0, 300.0);
-    final double popupX = (screenSize.width - popupWidth) / 2; // Center horizontally
-    final double popupY = (screenSize.height - popupHeight) / 2; // Center vertically
+    
+    // Get the real actual cursor coordinates using TextPainter and getOffsetForCaret (based on Stack Overflow solution)
+    // Safety check to prevent assertion failures during widget rebuilds
+    if (!_configEditorFocusNode.hasFocus || _configEditorFocusNode.context == null) {
+      // Fallback to center if focus is not available
+      final double popupX = (screenSize.width - popupWidth) / 2;
+      final double popupY = (screenSize.height - popupHeight) / 2;
+      _suggestionOverlay = OverlayEntry(
+        builder: (context) => _buildSuggestionOverlayContent(suggestions, currentWord, popupX, popupY, popupWidth, popupHeight),
+      );
+      Overlay.of(context).insert(_suggestionOverlay!);
+      return;
+    }
+    
+    final RenderBox? focusBox = _configEditorFocusNode.context?.findRenderObject() as RenderBox?;
+    if (focusBox == null) {
+      // Fallback to center if we can't get the focus position
+      final double popupX = (screenSize.width - popupWidth) / 2;
+      final double popupY = (screenSize.height - popupHeight) / 2;
+      _suggestionOverlay = OverlayEntry(
+        builder: (context) => _buildSuggestionOverlayContent(suggestions, currentWord, popupX, popupY, popupWidth, popupHeight),
+      );
+      Overlay.of(context).insert(_suggestionOverlay!);
+      return;
+    }
+    
+    // Get the real actual position of the focused text editor
+    final Offset focusPosition = focusBox.localToGlobal(Offset.zero);
+    
+    // Get the real actual cursor position from the text editor
+    final int cursorPos = _configEditorController.selection.baseOffset;
+    final String text = _configEditorController.text;
+    
+    // Use TextPainter to get the real actual cursor coordinates (Stack Overflow method)
+    final TextPainter textPainter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: const TextStyle(
+          fontFamily: 'monospace',
+          fontSize: 12,
+          height: 1.4,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    );
+    
+    textPainter.layout();
+    
+    // Get the real actual cursor position using getOffsetForCaret
+    final Offset cursorOffset = textPainter.getOffsetForCaret(
+      TextPosition(offset: cursorPos),
+      Rect.zero,
+    );
+    
+    // Calculate the real actual cursor position in screen coordinates
+    // Account for content padding
+    final double contentPadding = 12.0; // From InputDecoration contentPadding
+    final double scrollOffset = _debugScrollOffset; // Use the debug value
+    final double cursorX = focusPosition.dx + contentPadding + cursorOffset.dx;
+    final double cursorY = focusPosition.dy + contentPadding + cursorOffset.dy;
+    
+    // Store debug cursor Y coordinate
+    if (mounted) {
+      setState(() {
+        _debugCursorY = cursorY;
+      });
+    }
+    
+    // Position popup above the cursor to avoid overlapping the text
+    double popupX = cursorX;
+    double popupY = cursorY - popupHeight - 15.0; // Position above cursor with 15px gap
+    
+    // If not enough space above, position below the cursor
+    if (popupY < 0) {
+      popupY = cursorY + 20.0; // Position below cursor with 20px gap
+    }
+    
+    // Store debug popup Y coordinate
+    if (mounted) {
+      setState(() {
+        _debugPopupY = popupY;
+      });
+    }
+    
+    // Ensure popup doesn't go off the right edge
+    if (popupX + popupWidth > screenSize.width - 20.0) {
+      popupX = screenSize.width - popupWidth - 20.0;
+    }
+    
+    // Ensure popup doesn't go off the left edge
+    if (popupX < 20.0) {
+      popupX = 20.0;
+    }
+    
+    // Ensure popup doesn't go off the bottom edge
+    if (popupY + popupHeight > screenSize.height - 50.0) {
+      popupY = screenSize.height - popupHeight - 50.0;
+    }
     
     _suggestionOverlay = OverlayEntry(
       builder: (context) => _buildSuggestionOverlayContent(suggestions, currentWord, popupX, popupY, popupWidth, popupHeight),
@@ -1217,6 +1436,8 @@ class _HomePageState extends State<HomePage> {
 
   /// Update suggestion overlay to reflect current selection
   void _updateSuggestionOverlay() {
+    if (!mounted || _isRebuilding || _isLayoutInProgress) return;
+    
     if (_suggestionOverlay != null && _currentSuggestions.isNotEmpty && _currentWord != null) {
       _suggestionOverlay!.markNeedsBuild();
       _scrollToSelectedSuggestion();
@@ -1261,8 +1482,10 @@ class _HomePageState extends State<HomePage> {
 
   /// Hide suggestion overlay
   void _hideSuggestionOverlay() {
-    _suggestionOverlay?.remove();
-    _suggestionOverlay = null;
+    if (_suggestionOverlay != null) {
+      _suggestionOverlay!.remove();
+      _suggestionOverlay = null;
+    }
     _selectedSuggestionIndex = -1;
   }
 
@@ -1714,6 +1937,7 @@ class _HomePageState extends State<HomePage> {
     _suggestionScrollController.dispose();
     _configEditorController.dispose();
     _autocompleteTimer?.cancel();
+    _overlayTimer?.cancel();
     _hideSuggestionOverlay();
     // Dispose config controllers
     for (final TextEditingController controller in _configControllers.values) {
