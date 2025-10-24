@@ -9,6 +9,16 @@ import 'package:flutter_libserialport/flutter_libserialport.dart';
 import 'package:ftpconnect/ftpconnect.dart';
 import 'package:flutter/services.dart';
 
+/// Cross link step types for step-by-step construction
+enum CrossLinkStepType {
+  sourceSlot,
+  sourceReport,
+  sourceValue,
+  targetSlot,
+  targetCommand,
+  targetValue,
+}
+
 void main() {
   runApp(const ModuleBoxApp());
 }
@@ -70,9 +80,6 @@ class _HomePageState extends State<HomePage> {
   int _selectedSuggestionIndex = -1;
   bool _isRebuilding = false;
   bool _isLayoutInProgress = false;
-  double _debugScrollOffset = 0.0;
-  double _debugPopupY = 0.0;
-  double _debugCursorY = 0.0;
   // Cached files loaded from removable drives when serial device is selected
   String? _cachedManifestContent; // TODO: Use for device manifest display
   String? _cachedConfigContent;
@@ -131,13 +138,7 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _setupAutocompleteListener();
-    _setupScrollListener();
     _startScan();
-  }
-
-  /// Setup scroll listener for debug scroll offset tracking
-  void _setupScrollListener() {
-    _textEditorScrollController.addListener(_updateDebugScrollOffset);
   }
 
   @override
@@ -154,17 +155,6 @@ class _HomePageState extends State<HomePage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _isLayoutInProgress = false;
     });
-  }
-
-  /// Update debug scroll offset value
-  void _updateDebugScrollOffset() {
-    if (mounted) {
-      setState(() {
-        _debugScrollOffset = _textEditorScrollController.hasClients 
-            ? _textEditorScrollController.position.pixels 
-            : 0.0;
-      });
-    }
   }
 
   /// Setup autocomplete listener for text changes
@@ -1057,6 +1047,13 @@ class _HomePageState extends State<HomePage> {
         }
       }
     }
+    // Special handling for cross_link= parameter - step by step rule construction
+    else if (lowerWord.startsWith('cross_link=') || lowerWord == 'cross_link') {
+      final List<String> crossLinkSuggestions = _getCrossLinkStepByStepSuggestions(lowerWord);
+      for (final String suggestion in crossLinkSuggestions) {
+        suggestions.add(suggestion);
+      }
+    }
     // Special handling for options= parameter - get option values from manifest based on current mode
     else if (lowerWord.startsWith('options=') || lowerWord == 'options') {
       _log('DEBUG: Options= logic triggered for: $lowerWord');
@@ -1318,16 +1315,8 @@ class _HomePageState extends State<HomePage> {
     // Calculate the real actual cursor position in screen coordinates
     // Account for content padding
     final double contentPadding = 12.0; // From InputDecoration contentPadding
-    final double scrollOffset = _debugScrollOffset; // Use the debug value
     final double cursorX = focusPosition.dx + contentPadding + cursorOffset.dx;
     final double cursorY = focusPosition.dy + contentPadding + cursorOffset.dy;
-    
-    // Store debug cursor Y coordinate
-    if (mounted) {
-      setState(() {
-        _debugCursorY = cursorY;
-      });
-    }
     
     // Position popup above the cursor to avoid overlapping the text
     double popupX = cursorX;
@@ -1336,13 +1325,6 @@ class _HomePageState extends State<HomePage> {
     // If not enough space above, position below the cursor
     if (popupY < 0) {
       popupY = cursorY + 20.0; // Position below cursor with 20px gap
-    }
-    
-    // Store debug popup Y coordinate
-    if (mounted) {
-      setState(() {
-        _debugPopupY = popupY;
-      });
     }
     
     // Ensure popup doesn't go off the right edge
@@ -1541,6 +1523,49 @@ class _HomePageState extends State<HomePage> {
         // No existing options, just add the new option
         replacementText = suggestion;
         replacementStart = start + 8; // Start after "options="
+        replacementEnd = end;
+      }
+    } else if (currentWord.startsWith('cross_link=')) {
+      // For cross_link= suggestions, handle step-by-step construction
+      final String currentCrossLinkValue = currentWord.substring(11); // Remove "cross_link=" prefix
+      final CrossLinkStepType stepType = _parseCrossLinkStep(currentCrossLinkValue);
+      
+      if (stepType == CrossLinkStepType.sourceSlot) {
+        // Step 1: Replace the entire cross_link value with the source slot
+        replacementText = suggestion;
+        replacementStart = start + 11; // Start after "cross_link="
+        replacementEnd = end;
+      } else if (stepType == CrossLinkStepType.sourceReport) {
+        // Step 2: Add source report after source slot with /
+        final String sourceSlot = _extractSourceSlotFromCrossLink(currentCrossLinkValue);
+        replacementText = '$sourceSlot/$suggestion';
+        replacementStart = start + 11; // Start after "cross_link="
+        replacementEnd = end;
+      } else if (stepType == CrossLinkStepType.sourceValue) {
+        // Step 3: Add source value after source report with :
+        final String sourcePart = currentCrossLinkValue.split('->')[0];
+        replacementText = '$sourcePart:$suggestion';
+        replacementStart = start + 11; // Start after "cross_link="
+        replacementEnd = end;
+      } else if (stepType == CrossLinkStepType.targetSlot) {
+        // Step 4: Add target slot after source part with ->
+        final String sourcePart = currentCrossLinkValue.split('->')[0];
+        replacementText = '$sourcePart->$suggestion';
+        replacementStart = start + 11; // Start after "cross_link="
+        replacementEnd = end;
+      } else if (stepType == CrossLinkStepType.targetCommand) {
+        // Step 5: Add target command after target slot with :
+        final String targetSlot = _extractTargetSlotFromCrossLink(currentCrossLinkValue);
+        final String sourcePart = currentCrossLinkValue.split('->')[0];
+        replacementText = '$sourcePart->$targetSlot:$suggestion';
+        replacementStart = start + 11; // Start after "cross_link="
+        replacementEnd = end;
+      } else if (stepType == CrossLinkStepType.targetValue) {
+        // Step 6: Add target value after target command with =
+        final String targetPart = currentCrossLinkValue.split('->')[1];
+        final String sourcePart = currentCrossLinkValue.split('->')[0];
+        replacementText = '$sourcePart->$targetPart=$suggestion';
+        replacementStart = start + 11; // Start after "cross_link="
         replacementEnd = end;
       }
     } else if (suggestion.startsWith('[') && suggestion.endsWith(']')) {
@@ -3340,6 +3365,250 @@ class _HomePageState extends State<HomePage> {
     
     // Add the new slot number
     return '${baseValue}_$newSlotNumber';
+  }
+
+  /// Get step-by-step cross link suggestions based on current input
+  List<String> _getCrossLinkStepByStepSuggestions(String currentInput) {
+    final List<String> suggestions = <String>[];
+    
+    if (currentInput == 'cross_link') {
+      // Step 1: Show source slots
+      final List<String> sourceSlots = _getTopicBasedSourceSlots();
+      for (final String slot in sourceSlots) {
+        suggestions.add(slot);
+      }
+    } else if (currentInput.startsWith('cross_link=')) {
+      final String crossLinkValue = currentInput.substring(11); // Remove 'cross_link=' prefix
+      final CrossLinkStepType stepType = _parseCrossLinkStep(crossLinkValue);
+      
+      switch (stepType) {
+        case CrossLinkStepType.sourceSlot:
+          // Step 1: Show source slots
+          final List<String> sourceSlots = _getTopicBasedSourceSlots();
+          for (final String slot in sourceSlots) {
+            if (slot.toLowerCase().contains(crossLinkValue.toLowerCase())) {
+              // Don't suggest if it exactly matches what's already typed
+              if (slot.toLowerCase() != crossLinkValue.toLowerCase()) {
+                suggestions.add(slot);
+              }
+            }
+          }
+          break;
+          
+        case CrossLinkStepType.sourceReport:
+          // Step 2: Show source reports
+          final List<String> reports = _getReportTopicsForCurrentMode();
+          final String filterText = _extractFilterTextAfterSlash(crossLinkValue);
+          
+          for (final String report in reports) {
+            if (report.isNotEmpty && (filterText.isEmpty || report.toLowerCase().contains(filterText.toLowerCase()))) {
+              // Don't suggest if it exactly matches what's already typed
+              if (filterText.isEmpty || report.toLowerCase() != filterText.toLowerCase()) {
+                suggestions.add(report);
+              }
+            }
+          }
+          break;
+          
+        case CrossLinkStepType.sourceValue:
+          // Step 3: Show source values (topic variables from source slot)
+          final String sourceSlot = _extractSourceSlotFromCrossLink(crossLinkValue);
+          final List<String> topicValues = _getTopicValuesFromSlotSilent(sourceSlot);
+          final String currentValue = _extractCurrentValueFromCrossLink(crossLinkValue);
+          
+          for (final String value in topicValues) {
+            // Don't suggest if it exactly matches what's already typed
+            if (value.toLowerCase() != currentValue.toLowerCase()) {
+              suggestions.add(value);
+            }
+          }
+          break;
+          
+        case CrossLinkStepType.targetSlot:
+          // Step 4: Show target slots
+          final List<String> targetSlots = _getTopicBasedSourceSlots();
+          final String filterText = _extractFilterTextAfterArrow(crossLinkValue);
+          
+          for (final String slot in targetSlots) {
+            if (filterText.isEmpty || slot.toLowerCase().contains(filterText.toLowerCase())) {
+              // Don't suggest if it exactly matches what's already typed
+              if (slot.toLowerCase() != filterText.toLowerCase()) {
+                suggestions.add(slot);
+              }
+            }
+          }
+          break;
+          
+        case CrossLinkStepType.targetCommand:
+          // Step 5: Show target commands
+          final String targetSlot = _extractTargetSlotFromCrossLink(crossLinkValue);
+          final List<String> commands = _getTargetCommandsForSlot(targetSlot);
+          final String currentCommand = _extractCurrentCommandFromCrossLink(crossLinkValue);
+          
+          for (final String command in commands) {
+            if (command.isNotEmpty) {
+              // Don't suggest if it exactly matches what's already typed
+              if (command.toLowerCase() != currentCommand.toLowerCase()) {
+                suggestions.add(command);
+              }
+            }
+          }
+          break;
+          
+        case CrossLinkStepType.targetValue:
+          // Step 6: Show target values (topic variables from target slot)
+          final String targetSlot = _extractTargetSlotFromCrossLink(crossLinkValue);
+          final List<String> topicValues = _getTopicValuesFromSlotSilent(targetSlot);
+          final String currentTargetValue = _extractCurrentTargetValueFromCrossLink(crossLinkValue);
+          
+          for (final String value in topicValues) {
+            // Don't suggest if it exactly matches what's already typed
+            if (value.toLowerCase() != currentTargetValue.toLowerCase()) {
+              suggestions.add(value);
+            }
+          }
+          break;
+      }
+    }
+    
+    return suggestions;
+  }
+
+  /// Parse cross link step to determine current step type
+  CrossLinkStepType _parseCrossLinkStep(String crossLinkValue) {
+    if (crossLinkValue.isEmpty) {
+      return CrossLinkStepType.sourceSlot;
+    }
+    
+    // Check if we have source slot and looking for source report
+    if (crossLinkValue.contains('/') && !crossLinkValue.contains('->')) {
+      return CrossLinkStepType.sourceReport;
+    }
+    
+    // Check if user just typed "/" after source slot - trigger source report selection
+    if (crossLinkValue.endsWith('/')) {
+      return CrossLinkStepType.sourceReport;
+    }
+    
+    // Check if we have source part and looking for target slot
+    if (crossLinkValue.contains('->')) {
+      final List<String> parts = crossLinkValue.split('->');
+      if (parts.length == 1) {
+        return CrossLinkStepType.targetSlot;
+      } else if (parts.length == 2) {
+        final String targetPart = parts[1];
+        if (targetPart.isEmpty) {
+          return CrossLinkStepType.targetSlot;
+        } else if (!targetPart.contains(':')) {
+          return CrossLinkStepType.targetCommand;
+        } else {
+          return CrossLinkStepType.targetValue;
+        }
+      }
+    }
+    
+    // Check if we have source slot and source report, looking for source value
+    if (crossLinkValue.contains('/')) {
+      final List<String> sourceParts = crossLinkValue.split('/');
+      if (sourceParts.length == 2 && sourceParts[1].isNotEmpty && !sourceParts[1].contains('->')) {
+        return CrossLinkStepType.sourceValue;
+      }
+    }
+    
+    return CrossLinkStepType.sourceSlot;
+  }
+
+  /// Extract source slot from cross link value
+  String _extractSourceSlotFromCrossLink(String crossLinkValue) {
+    if (crossLinkValue.contains('/')) {
+      return crossLinkValue.split('/')[0];
+    } else if (crossLinkValue.contains('->')) {
+      return crossLinkValue.split('->')[0].split('/')[0];
+    }
+    return crossLinkValue;
+  }
+
+  /// Extract target slot from cross link value
+  String _extractTargetSlotFromCrossLink(String crossLinkValue) {
+    if (crossLinkValue.contains('->')) {
+      final List<String> parts = crossLinkValue.split('->');
+      if (parts.length >= 2) {
+        final String targetPart = parts[1];
+        if (targetPart.contains(':')) {
+          return targetPart.split(':')[0];
+        }
+        return targetPart;
+      }
+    }
+    return '';
+  }
+
+  /// Extract filter text after slash (for source report filtering)
+  String _extractFilterTextAfterSlash(String crossLinkValue) {
+    if (crossLinkValue.contains('/')) {
+      final List<String> parts = crossLinkValue.split('/');
+      if (parts.length >= 2) {
+        return parts[1];
+      }
+    }
+    return '';
+  }
+
+  /// Extract filter text after arrow (for target slot filtering)
+  String _extractFilterTextAfterArrow(String crossLinkValue) {
+    if (crossLinkValue.contains('->')) {
+      final List<String> parts = crossLinkValue.split('->');
+      if (parts.length >= 2) {
+        return parts[1];
+      }
+    }
+    return '';
+  }
+
+  /// Extract current value from cross link (for source value filtering)
+  String _extractCurrentValueFromCrossLink(String crossLinkValue) {
+    if (crossLinkValue.contains(':')) {
+      final List<String> parts = crossLinkValue.split(':');
+      if (parts.length >= 2) {
+        return parts[1];
+      }
+    }
+    return '';
+  }
+
+  /// Extract current command from cross link (for target command filtering)
+  String _extractCurrentCommandFromCrossLink(String crossLinkValue) {
+    if (crossLinkValue.contains('->')) {
+      final List<String> parts = crossLinkValue.split('->');
+      if (parts.length >= 2) {
+        final String targetPart = parts[1];
+        if (targetPart.contains(':')) {
+          final List<String> targetParts = targetPart.split(':');
+          if (targetParts.length >= 2) {
+            return targetParts[1];
+          }
+        }
+        return targetPart;
+      }
+    }
+    return '';
+  }
+
+  /// Extract current target value from cross link (for target value filtering)
+  String _extractCurrentTargetValueFromCrossLink(String crossLinkValue) {
+    if (crossLinkValue.contains('->')) {
+      final List<String> parts = crossLinkValue.split('->');
+      if (parts.length >= 2) {
+        final String targetPart = parts[1];
+        if (targetPart.contains('=')) {
+          final List<String> targetParts = targetPart.split('=');
+          if (targetParts.length >= 2) {
+            return targetParts[1];
+          }
+        }
+      }
+    }
+    return '';
   }
 
   /// Get report topics from manifest.json for the current mode
