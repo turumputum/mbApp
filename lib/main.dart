@@ -1040,8 +1040,8 @@ class _HomePageState extends State<HomePage> {
       }
     }
     
-    // Add SLOT chapter suggestions (numbers 0-11, excluding existing ones)
-    for (int i = 0; i <= 11; i++) {
+    // Add SLOT chapter suggestions (numbers 0-9, excluding existing ones)
+    for (int i = 0; i <= 9; i++) {
       final String slotChapter = 'SLOT_$i';
       if (!existingChapters.contains(slotChapter)) {
         uniqueSuggestions.add('[$slotChapter]');
@@ -1137,7 +1137,7 @@ class _HomePageState extends State<HomePage> {
     
     // Calculate position for the suggestion popup
     final double popupWidth = 300.0;
-    final double popupHeight = (suggestions.length * 40.0).clamp(100.0, 300.0);
+    final double popupHeight = (suggestions.length * 40.0).clamp(80.0, 300.0);
     final double popupX = (screenSize.width - popupWidth) / 2; // Center horizontally
     final double popupY = (screenSize.height - popupHeight) / 2; // Center vertically
     
@@ -1166,60 +1166,6 @@ class _HomePageState extends State<HomePage> {
           ),
           child: Column(
             children: [
-              // Header
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(8),
-                    topRight: Radius.circular(8),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.auto_awesome, size: 16, color: Colors.blue[600]),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Suggestions for "$currentWord"',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.blue[800],
-                        ),
-                      ),
-                    ),
-                    GestureDetector(
-                      onTap: _hideSuggestionOverlay,
-                      child: Icon(Icons.close, size: 16, color: Colors.grey[600]),
-                    ),
-                  ],
-                ),
-              ),
-              // Instructions
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.grey[50],
-                  border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.keyboard, size: 12, color: Colors.grey[600]),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        'Tab: highlight • Enter: select • ↑↓: navigate • Esc: close',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
               // Suggestions list
               Expanded(
                 child: ListView.builder(
@@ -1469,12 +1415,12 @@ class _HomePageState extends State<HomePage> {
   }
 
   /// Check if a slot number is valid for a mode based on its slots field
-  /// Supports formats like "0-5", "1", "6-11", "0,2,4", etc.
+  /// Supports formats like "0-5", "1", "6-9", "0,2,4", etc.
   bool _isSlotValidForMode(String slotNumber, String slotsField) {
     try {
       final int slot = int.parse(slotNumber);
       
-      // Handle range format like "0-5", "6-11"
+      // Handle range format like "0-5", "6-9"
       if (slotsField.contains('-')) {
         final List<String> rangeParts = slotsField.split('-');
         if (rangeParts.length == 2) {
@@ -2471,9 +2417,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _showAddSlotChapterDialog() {
-    // Find available SLOT numbers (0-11)
+    // Find available SLOT numbers (0-9)
     final List<int> availableNumbers = <int>[];
-    for (int i = 0; i <= 11; i++) {
+    for (int i = 0; i <= 9; i++) {
       final String chapterName = 'SLOT_$i';
       if (!_parsedConfig.containsKey(chapterName)) {
         availableNumbers.add(i);
@@ -2481,7 +2427,7 @@ class _HomePageState extends State<HomePage> {
     }
     
     if (availableNumbers.isEmpty) {
-      _log('No available SLOT numbers (0-11)');
+      _log('No available SLOT numbers (0-9)');
       return;
     }
     
