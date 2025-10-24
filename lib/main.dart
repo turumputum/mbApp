@@ -633,48 +633,48 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-      // Debug view for scroll offset
-      Positioned(
-        top: 10,
-        right: 10,
-        child: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.7),
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Scroll: ${_debugScrollOffset.toStringAsFixed(1)}',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontFamily: 'monospace',
-                ),
-              ),
-              Text(
-                'Cursor Y: ${_debugCursorY.toStringAsFixed(1)}',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontFamily: 'monospace',
-                ),
-              ),
-              Text(
-                'Popup Y: ${_debugPopupY.toStringAsFixed(1)}',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+      // Debug view for scroll offset (hidden)
+      // Positioned(
+      //   top: 10,
+      //   right: 10,
+      //   child: Container(
+      //     padding: const EdgeInsets.all(8),
+      //     decoration: BoxDecoration(
+      //       color: Colors.black.withOpacity(0.7),
+      //       borderRadius: BorderRadius.circular(4),
+      //     ),
+      //     child: Column(
+      //       crossAxisAlignment: CrossAxisAlignment.start,
+      //       mainAxisSize: MainAxisSize.min,
+      //       children: [
+      //         Text(
+      //           'Scroll: ${_debugScrollOffset.toStringAsFixed(1)}',
+      //           style: const TextStyle(
+      //             color: Colors.white,
+      //             fontSize: 12,
+      //             fontFamily: 'monospace',
+      //           ),
+      //         ),
+      //         Text(
+      //           'Cursor Y: ${_debugCursorY.toStringAsFixed(1)}',
+      //           style: const TextStyle(
+      //             color: Colors.white,
+      //             fontSize: 12,
+      //             fontFamily: 'monospace',
+      //           ),
+      //         ),
+      //         Text(
+      //           'Popup Y: ${_debugPopupY.toStringAsFixed(1)}',
+      //           style: const TextStyle(
+      //             color: Colors.white,
+      //             fontSize: 12,
+      //             fontFamily: 'monospace',
+      //           ),
+      //         ),
+      //       ],
+      //     ),
+      //   ),
+      // ),
     ]));
   }
 
