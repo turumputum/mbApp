@@ -341,6 +341,7 @@ class _HomePageState extends State<HomePage> {
       _log('UDP: Found ${interfaces.length} network interface(s)');
 
       final List<DeviceItem> found = <DeviceItem>[];
+      final Set<String> uniqueDeviceIds = <String>{}; // Track unique device identifiers
       final List<RawDatagramSocket> sockets = <RawDatagramSocket>[];
       
       // Create a socket for each interface and send broadcasts
@@ -356,45 +357,53 @@ class _HomePageState extends State<HomePage> {
             
             // Calculate broadcast address for this interface
             final String? broadcastAddress = _calculateBroadcastAddress(address.address);
-            if (broadcastAddress != null) {
-              final List<int> data = utf8.encode('moduleBoxApp:getName');
-              socket.send(data, InternetAddress(broadcastAddress), 9000);
-              _log('UDP: broadcast sent from ${interface.name} (${address.address}) to $broadcastAddress:9000');
-            } else {
-              // Fallback to global broadcast if we can't calculate the specific broadcast address
-              final List<int> data = utf8.encode('moduleBoxApp:getName');
-              socket.send(data, InternetAddress('255.255.255.255'), 9000);
-              _log('UDP: broadcast sent from ${interface.name} (${address.address}) to 255.255.255.255:9000 (fallback)');
+            final InternetAddress targetAddress = broadcastAddress != null
+                ? InternetAddress(broadcastAddress)
+                : InternetAddress('255.255.255.255');
+            
+            // Send 3 packets with 100ms delay between them
+            final List<int> data = utf8.encode('moduleBoxApp:getName');
+            for (int i = 0; i < 3; i++) {
+              socket.send(data, targetAddress, 9000);
+              if (broadcastAddress != null) {
+                _log('UDP: broadcast packet ${i + 1}/3 sent from ${interface.name} (${address.address}) to $broadcastAddress:9000');
+              } else {
+                _log('UDP: broadcast packet ${i + 1}/3 sent from ${interface.name} (${address.address}) to 255.255.255.255:9000 (fallback)');
+              }
+              
+              // Wait 100ms before sending next packet (except for the last one)
+              if (i < 2) {
+                await Future<void>.delayed(const Duration(milliseconds: 100));
+              }
             }
             
             // Set up listener for responses on this socket
             socket.listen((RawSocketEvent event) {
-        if (event == RawSocketEvent.read) {
+              if (event == RawSocketEvent.read) {
                 final Datagram? dg = socket.receive();
-          if (dg == null) return;
-          final String msg = _safeAscii(utf8.decode(dg.data, allowMalformed: true)).trim();
-          if (_isValidEnglish(msg) && msg.startsWith('moduleBoxApp:myNameIs')) {
-            final String name = msg.substring('moduleBoxApp:myNameIs'.length).trim();
-            final String host = dg.address.address;
-            final int port = dg.port;
+                if (dg == null) return;
+                final String msg = _safeAscii(utf8.decode(dg.data, allowMalformed: true)).trim();
+                if (_isValidEnglish(msg) && msg.startsWith('moduleBoxApp:myNameIs')) {
+                  final String name = msg.substring('moduleBoxApp:myNameIs'.length).trim();
+                  final String host = dg.address.address;
+                  final int port = dg.port;
+                  final String deviceId = '$host:$port';
                   
-                  // Check if we already found this device to avoid duplicates
-                  final bool alreadyFound = found.any((DeviceItem d) => 
-                      d.identifier == '$host:$port' && d.kind == 'udp');
-                  
-                  if (!alreadyFound) {
-            found.add(DeviceItem(
-              displayName: '${name.isEmpty ? '(unnamed)' : name}',
-              kind: 'udp',
-              identifier: '$host:$port',
-              extra: <String, Object?>{
-                'raw': msg,
-                'ip': host,
-                'port': port,
+                  // Check if we already found this device using Set for efficient uniqueness check
+                  if (!uniqueDeviceIds.contains(deviceId)) {
+                    uniqueDeviceIds.add(deviceId);
+                    found.add(DeviceItem(
+                      displayName: '${name.isEmpty ? '(unnamed)' : name}',
+                      kind: 'udp',
+                      identifier: deviceId,
+                      extra: <String, Object?>{
+                        'raw': msg,
+                        'ip': host,
+                        'port': port,
                         'interface': interface.name,
                         'source_address': address.address,
-              },
-            ));
+                      },
+                    ));
                     _log('UDP: device "${name.isEmpty ? '(unnamed)' : name}" from $host:$port (via ${interface.name})');
                   }
                 }
@@ -407,7 +416,7 @@ class _HomePageState extends State<HomePage> {
         }
       }
       
-      // Wait for responses
+      // Wait for responses (allow time after last packet is sent)
       _log('UDP: Waiting for responses...');
       await Future<void>.delayed(const Duration(seconds: 2));
       
