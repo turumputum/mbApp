@@ -1587,7 +1587,7 @@ class _HomePageState extends State<HomePage> {
       } else if (stepType == CrossLinkStepType.sourceReport) {
         // Step 2: Add source report after source slot with /
         final String sourceSlot = _extractSourceSlotFromCrossLink(currentRule);
-        replacementText = existingRules + '$sourceSlot/$suggestion';
+        replacementText = existingRules + '$sourceSlot/$suggestion' + ':';
         replacementStart = start + 11; // Start after "cross_link="
         replacementEnd = end;
       } else if (stepType == CrossLinkStepType.sourceValue) {
@@ -1606,7 +1606,7 @@ class _HomePageState extends State<HomePage> {
         // Step 5: Add target command after target slot with /
         final String targetSlot = _extractTargetSlotFromCrossLink(currentRule);
         final String sourcePart = currentRule.split('->')[0];
-        replacementText = existingRules + '$sourcePart->$targetSlot/$suggestion';
+        replacementText = existingRules + '$sourcePart->$targetSlot/$suggestion' + ':';
         replacementStart = start + 11; // Start after "cross_link="
         replacementEnd = end;
       } else if (stepType == CrossLinkStepType.targetValue) {
@@ -1879,7 +1879,7 @@ class _HomePageState extends State<HomePage> {
   /// Handle keyboard events for Tab navigation
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is KeyDownEvent) {
-      if (event.logicalKey == LogicalKeyboardKey.tab && _currentSuggestions.isNotEmpty) {
+      if (event.logicalKey == LogicalKeyboardKey.tab && _suggestionOverlay != null && _currentSuggestions.isNotEmpty) {
         if (_selectedSuggestionIndex == -1) {
           // First Tab press - select first suggestion
           _selectedSuggestionIndex = 0;
@@ -1887,23 +1887,23 @@ class _HomePageState extends State<HomePage> {
           return KeyEventResult.handled;
         }
         // Tab with suggestion selected - don't handle, let it pass through
-      } else if (event.logicalKey == LogicalKeyboardKey.enter && _currentSuggestions.isNotEmpty && _selectedSuggestionIndex >= 0) {
+      } else if (event.logicalKey == LogicalKeyboardKey.enter && _suggestionOverlay != null && _currentSuggestions.isNotEmpty && _selectedSuggestionIndex >= 0) {
         // Enter key - select the highlighted suggestion
         _selectSuggestion(_currentSuggestions[_selectedSuggestionIndex], _currentWord ?? '');
         return KeyEventResult.handled;
-      } else if (event.logicalKey == LogicalKeyboardKey.escape && _currentSuggestions.isNotEmpty) {
+      } else if (event.logicalKey == LogicalKeyboardKey.escape && _suggestionOverlay != null && _currentSuggestions.isNotEmpty) {
         // Escape - hide suggestions
         _hideSuggestionOverlay();
         _selectedSuggestionIndex = -1;
         return KeyEventResult.handled;
-      } else if (event.logicalKey == LogicalKeyboardKey.arrowDown && _currentSuggestions.isNotEmpty) {
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowDown && _suggestionOverlay != null && _currentSuggestions.isNotEmpty) {
         // Arrow down - navigate to next suggestion
         if (_selectedSuggestionIndex < _currentSuggestions.length - 1) {
           _selectedSuggestionIndex++;
           _updateSuggestionOverlay();
         }
         return KeyEventResult.handled;
-      } else if (event.logicalKey == LogicalKeyboardKey.arrowUp && _currentSuggestions.isNotEmpty) {
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowUp && _suggestionOverlay != null && _currentSuggestions.isNotEmpty) {
         // Arrow up - navigate to previous suggestion
         if (_selectedSuggestionIndex > 0) {
           _selectedSuggestionIndex--;
