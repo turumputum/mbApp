@@ -1633,6 +1633,14 @@ class _HomePageState extends State<HomePage> {
     );
     
     _hideSuggestionOverlay();
+    
+    // If a mode was changed, refresh suggestions to update options= suggestions for the current SLOT
+    if (suggestion.startsWith('mode=') && currentWord.startsWith('mode=')) {
+      // Use Future.microtask to ensure the text update is complete before refreshing
+      Future.microtask(() {
+        _updateAutocompleteSuggestions();
+      });
+    }
   }
 
   /// Get suggestion icon
@@ -1775,6 +1783,7 @@ class _HomePageState extends State<HomePage> {
   }
 
   /// Get the mode value for a chapter directly from the text editor content
+  /// Handles flexible spacing around "=" (e.g., "mode=", "mode =", "mode = ")
   String? _getModeFromTextEditor(String chapterName) {
     final String text = _configEditorController.text;
     final List<String> lines = text.split('\n');
@@ -1790,11 +1799,18 @@ class _HomePageState extends State<HomePage> {
         continue;
       }
       
-      // If we're in the target chapter, look for mode= line
-      if (inChapter && trimmedLine.startsWith('mode=')) {
-        final String mode = trimmedLine.substring(5).trim();
-        _log('DEBUG: Found mode in text editor for $chapterName: $mode');
-        return mode;
+      // If we're in the target chapter, look for mode= line with flexible spacing
+      if (inChapter && trimmedLine.contains('=')) {
+        // Parse the key=value pair with flexible spacing
+        final int equalIndex = trimmedLine.indexOf('=');
+        if (equalIndex > 0) {
+          final String key = trimmedLine.substring(0, equalIndex).trim();
+          if (key.toLowerCase() == 'mode') {
+            final String mode = trimmedLine.substring(equalIndex + 1).trim();
+            _log('DEBUG: Found mode in text editor for $chapterName: $mode');
+            return mode;
+          }
+        }
       }
       
       // If we hit another chapter header, we're no longer in this chapter
@@ -1820,18 +1836,23 @@ class _HomePageState extends State<HomePage> {
       // Try to determine the chapter from the text editor context first
       currentChapter = _getCurrentChapterFromTextEditor();
       if (currentChapter != null) {
-        // First try to get mode from parsed config
-        currentMode = _parsedConfig[currentChapter]?['mode'];
+        // Prioritize getting mode from text editor (real-time editing) over parsed config
+        // This ensures that when mode= is changed, options= suggestions update immediately
+        currentMode = _getModeFromTextEditor(currentChapter);
         if (currentMode == null || currentMode.isEmpty) {
-          // If not found in parsed config, try to get it directly from text editor
-          currentMode = _getModeFromTextEditor(currentChapter);
+          // Fallback to parsed config if not found in text editor
+          currentMode = _parsedConfig[currentChapter]?['mode'];
         }
         _log('DEBUG: Found chapter from text editor: $currentChapter, mode: $currentMode');
       } else {
         // Fallback to selected chapter
         if (_selectedChapter != null) {
           currentChapter = _selectedChapter;
-          currentMode = _parsedConfig[_selectedChapter!]?['mode'];
+          // Try text editor first, then fallback to parsed config
+          currentMode = _getModeFromTextEditor(_selectedChapter!);
+          if (currentMode == null || currentMode.isEmpty) {
+            currentMode = _parsedConfig[_selectedChapter!]?['mode'];
+          }
           _log('DEBUG: Using selected chapter: $currentChapter, mode: $currentMode');
         }
       }
