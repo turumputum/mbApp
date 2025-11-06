@@ -186,6 +186,8 @@ class _HomePageState extends State<HomePage> {
     final String text = _configEditorController.text;
     final int cursorPos = _configEditorController.selection.baseOffset;
     
+    _log('DEBUG: _updateAutocompleteSuggestions called, cursorPos: $cursorPos, text length: ${text.length}');
+    
     if (cursorPos <= 0 || text.isEmpty) {
       _hideSuggestionOverlay();
       if (mounted) {
@@ -197,25 +199,71 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    // Find current word being typed (including special handling for mode=)
+    // Find current word being typed (including special handling for mode=, options=, etc.)
+    // For known keywords, we need to handle spaces around "=", so we'll scan from cursor backwards
+    // to find the keyword and include everything up to cursor
+    
     int start = cursorPos;
     int end = cursorPos;
     
-    // Find word boundaries, but include = for mode= detection
-    while (start > 0 && !_isWordBoundaryForAutocomplete(text[start - 1])) {
-      start--;
-    }
-    while (end < text.length && !_isWordBoundaryForAutocomplete(text[end])) {
-      end++;
+    // First, try to find if we're in a known keyword context by looking backwards from cursor
+    // Look for patterns like "mode", "mode=", "mode =", "mode = ", etc.
+    int keywordStart = cursorPos;
+    int lookBack = cursorPos;
+    
+    // Look backwards to find a known keyword (mode, options, cross_link)
+    while (lookBack > 0 && lookBack > cursorPos - 50) { // Limit lookback to 50 chars
+      final char = text[lookBack - 1];
+      if (char == '\n') break; // Stop at newline
+      
+      // Check if we've found a complete keyword
+      final testWord = text.substring(lookBack - 1, cursorPos);
+      final normalizedTest = _normalizeWordForComparison(testWord).toLowerCase();
+      
+      if (normalizedTest == 'mode' || normalizedTest.startsWith('mode=') ||
+          normalizedTest == 'options' || normalizedTest.startsWith('options=') ||
+          normalizedTest == 'cross_link' || normalizedTest.startsWith('cross_link=')) {
+        keywordStart = lookBack - 1;
+        break;
+      }
+      
+      lookBack--;
     }
     
-    final String word = text.substring(start, end);
-    _log('DEBUG: Word detected: "$word", length: ${word.length}');
+    // If we found a keyword, use it; otherwise use normal word detection
+    if (keywordStart < cursorPos) {
+      // Found a keyword, include everything from keyword start to cursor
+      start = keywordStart;
+      end = cursorPos;
+      
+      // Make sure we don't go past a newline
+      int checkPos = start;
+      while (checkPos < end && checkPos < text.length) {
+        if (text[checkPos] == '\n') {
+          end = checkPos;
+          break;
+        }
+        checkPos++;
+      }
+    } else {
+      // Normal word detection
+      while (start > 0 && !_isWordBoundaryForAutocomplete(text[start - 1])) {
+        start--;
+      }
+      while (end < text.length && !_isWordBoundaryForAutocomplete(text[end])) {
+        end++;
+      }
+    }
+    
+    String word = text.substring(start, end);
+    _log('DEBUG: Final word: "$word", length: ${word.length}');
     _log('DEBUG: Text before cursor: "${text.substring(0, cursorPos)}"');
     _log('DEBUG: Start: $start, End: $end, Cursor: $cursorPos');
     
     if (word.length >= 2) {
+      _log('DEBUG: Calling _getAutocompleteSuggestions with: "$word"');
       final List<String> suggestions = _getAutocompleteSuggestions(word);
+      _log('DEBUG: Got ${suggestions.length} suggestions');
       if (mounted) {
         setState(() {
           _currentWord = word;
@@ -1036,11 +1084,15 @@ class _HomePageState extends State<HomePage> {
     if (currentWord.isEmpty) return [];
     
     _log('DEBUG: _getAutocompleteSuggestions called with: "$currentWord"');
-    final String lowerWord = currentWord.toLowerCase();
+    // Normalize the word to handle spaces around "=" (e.g., "mode = " becomes "mode=")
+    final String normalizedWord = _normalizeWordForComparison(currentWord);
+    final String lowerWord = normalizedWord.toLowerCase();
+    _log('DEBUG: After normalization: "$normalizedWord" -> "$lowerWord"');
     final Set<String> suggestions = <String>{};
     
     // Special handling for mode= parameter - get mode values from manifest
     if (lowerWord.startsWith('mode=') || lowerWord == 'mode') {
+      _log('DEBUG: Mode condition matched! lowerWord: "$lowerWord"');
       final List<String> modeSuggestions = _getModeSuggestionsFromManifest();
       String filterText = '';
       
@@ -1780,6 +1832,12 @@ class _HomePageState extends State<HomePage> {
     
     _log('DEBUG: Detected chapter from text editor: $lastChapter');
     return lastChapter;
+  }
+
+  /// Normalize a word by removing spaces around "=" for comparison
+  /// Converts "mode = " to "mode=", "mode  =  value" to "mode=value", etc.
+  String _normalizeWordForComparison(String word) {
+    return word.replaceAll(RegExp(r'\s*=\s*'), '=');
   }
 
   /// Get the mode value for a chapter directly from the text editor content
