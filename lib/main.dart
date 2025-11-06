@@ -165,6 +165,9 @@ class _HomePageState extends State<HomePage> {
       
       final String currentText = _configEditorController.text;
       if (currentText != _lastText) {
+        // Check if mode= was changed by comparing mode values in all SLOT chapters
+        bool modeChanged = _detectModeChange(_lastText, currentText);
+        
         _lastText = currentText;
         // Clear cached suggestions when text changes to refresh chapter suggestions
         _cachedSuggestions.clear();
@@ -172,10 +175,80 @@ class _HomePageState extends State<HomePage> {
         _autocompleteTimer = Timer(const Duration(milliseconds: 150), () {
           if (mounted) {
             _updateAutocompleteSuggestions();
+            // If mode changed and user is typing cross_link=, refresh suggestions
+            if (modeChanged) {
+              Future.microtask(() {
+                if (mounted) {
+                  _updateAutocompleteSuggestions();
+                }
+              });
+            }
           }
         });
       }
     });
+  }
+  
+  /// Detect if mode= value changed in any SLOT chapter
+  bool _detectModeChange(String oldText, String newText) {
+    if (oldText.isEmpty) return false;
+    
+    // Extract all mode values from old and new text
+    Map<String, String?> oldModes = _extractAllModeValues(oldText);
+    Map<String, String?> newModes = _extractAllModeValues(newText);
+    
+    // Check if any mode value changed
+    for (final String chapter in newModes.keys) {
+      final String? oldMode = oldModes[chapter];
+      final String? newMode = newModes[chapter];
+      if (oldMode != newMode) {
+        return true;
+      }
+    }
+    
+    return false;
+  }
+  
+  /// Extract all mode values from text for all SLOT chapters
+  Map<String, String?> _extractAllModeValues(String text) {
+    final Map<String, String?> modes = {};
+    final List<String> lines = text.split('\n');
+    String? currentChapter;
+    
+    for (final String line in lines) {
+      final String trimmedLine = line.trim();
+      
+      // Check if this is a chapter header
+      if (trimmedLine.startsWith('[') && trimmedLine.endsWith(']')) {
+        final String chapter = trimmedLine.substring(1, trimmedLine.length - 1);
+        if (chapter.startsWith('SLOT_')) {
+          currentChapter = chapter;
+          modes[currentChapter] = null; // Initialize
+        } else {
+          currentChapter = null;
+        }
+        continue;
+      }
+      
+      // If we're in a SLOT chapter, look for mode= line
+      if (currentChapter != null && trimmedLine.contains('=')) {
+        final int equalIndex = trimmedLine.indexOf('=');
+        if (equalIndex > 0) {
+          final String key = trimmedLine.substring(0, equalIndex).trim();
+          if (key.toLowerCase() == 'mode') {
+            final String mode = trimmedLine.substring(equalIndex + 1).trim();
+            modes[currentChapter] = mode;
+          }
+        }
+      }
+      
+      // If we hit another chapter header, reset current chapter
+      if (trimmedLine.startsWith('[') && trimmedLine.endsWith(']')) {
+        currentChapter = null;
+      }
+    }
+    
+    return modes;
   }
 
   /// Update autocomplete suggestions based on current text
@@ -3658,7 +3731,11 @@ class _HomePageState extends State<HomePage> {
       
       // If no topic variables found in options, try to get default values from manifest.json
       if (topicValues.isEmpty) {
-        final String? modeValue = _parsedConfig[slotChapter]?['mode'];
+        // Try to get mode from text editor first (real-time), then fall back to parsed config
+        String? modeValue = _getModeFromTextEditor(slotChapter);
+        if (modeValue == null || modeValue.isEmpty) {
+          modeValue = _parsedConfig[slotChapter]?['mode'];
+        }
         
         if (modeValue != null && modeValue.isNotEmpty) {
           final String slotNumber = _extractSlotNumber(slotChapter);
