@@ -3657,10 +3657,10 @@ class _HomePageState extends State<HomePage> {
       }
     }
     
-    // Add current chapter if it's not a SLOT chapter
-    if (_selectedChapter != null && !_selectedChapter!.startsWith('SLOT_')) {
-      complexSlots.add(_selectedChapter!);
-    }
+    // // Add current chapter if it's not a SLOT chapter
+    // if (_selectedChapter != null && !_selectedChapter!.startsWith('SLOT_')) {
+    //   complexSlots.add(_selectedChapter!);
+    // }
     
     return complexSlots;
   }
