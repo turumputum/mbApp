@@ -212,7 +212,9 @@ class _HomePageState extends State<HomePage> {
     int lookBack = cursorPos;
     
     // Look backwards to find a known keyword (mode, options, cross_link)
-    while (lookBack > 0 && lookBack > cursorPos - 50) { // Limit lookback to 50 chars
+    // Increase lookback limit to handle longer option values
+    final int maxLookback = 200;
+    while (lookBack > 0 && lookBack > cursorPos - maxLookback) {
       final char = text[lookBack - 1];
       if (char == '\n') break; // Stop at newline
       
@@ -220,10 +222,38 @@ class _HomePageState extends State<HomePage> {
       final testWord = text.substring(lookBack - 1, cursorPos);
       final normalizedTest = _normalizeWordForComparison(testWord).toLowerCase();
       
-      if (normalizedTest == 'mode' || normalizedTest.startsWith('mode=') ||
-          normalizedTest == 'options' || normalizedTest.startsWith('options=') ||
-          normalizedTest == 'cross_link' || normalizedTest.startsWith('cross_link=')) {
-        keywordStart = lookBack - 1;
+      String? matchedKeyword;
+      if (normalizedTest == 'mode' || normalizedTest.startsWith('mode=')) {
+        matchedKeyword = 'mode';
+      } else if (normalizedTest == 'options' || normalizedTest.startsWith('options=')) {
+        matchedKeyword = 'options';
+      } else if (normalizedTest == 'cross_link' || normalizedTest.startsWith('cross_link=')) {
+        matchedKeyword = 'cross_link';
+      }
+      
+      if (matchedKeyword != null) {
+        // Found a keyword match, now find the actual start of the keyword
+        int actualKeywordStart = lookBack - 1;
+        
+        // Look backwards to find the start of the keyword word
+        for (int i = actualKeywordStart; i >= 0 && i > actualKeywordStart - 100; i--) {
+          if (i < text.length) {
+            final String checkText = text.substring(i, cursorPos);
+            final String normalizedCheck = _normalizeWordForComparison(checkText).toLowerCase();
+            
+            if (normalizedCheck.startsWith(matchedKeyword)) {
+              if (i == 0 || _isWordBoundaryForAutocomplete(text[i - 1])) {
+                final String keywordFirstChar = matchedKeyword[0];
+                if (i < text.length && text[i].toLowerCase() == keywordFirstChar) {
+                  actualKeywordStart = i;
+                  break;
+                }
+              }
+            }
+          }
+        }
+        
+        keywordStart = actualKeywordStart;
         break;
       }
       
@@ -1569,105 +1599,324 @@ class _HomePageState extends State<HomePage> {
     if (cursorPos <= 0) return;
     
     // Find current word boundaries using the same logic as autocomplete detection
+    // Use the same improved keyword detection logic to handle "mode =", "mode=", etc.
     int start = cursorPos;
     int end = cursorPos;
     
-    // Find word boundaries, but include = for mode= detection (same as autocomplete)
-    while (start > 0 && !_isWordBoundaryForAutocomplete(text[start - 1])) {
-      start--;
+    // First, try to find if we're in a known keyword context by looking backwards from cursor
+    int keywordStart = cursorPos;
+    int lookBack = cursorPos;
+    
+    // Look backwards to find a known keyword (mode, options, cross_link)
+    final int maxLookback = 200;
+    while (lookBack > 0 && lookBack > cursorPos - maxLookback) {
+      final char = text[lookBack - 1];
+      if (char == '\n') break;
+      
+      final testWord = text.substring(lookBack - 1, cursorPos);
+      final normalizedTest = _normalizeWordForComparison(testWord).toLowerCase();
+      
+      String? matchedKeyword;
+      if (normalizedTest == 'mode' || normalizedTest.startsWith('mode=')) {
+        matchedKeyword = 'mode';
+      } else if (normalizedTest == 'options' || normalizedTest.startsWith('options=')) {
+        matchedKeyword = 'options';
+      } else if (normalizedTest == 'cross_link' || normalizedTest.startsWith('cross_link=')) {
+        matchedKeyword = 'cross_link';
+      }
+      
+      if (matchedKeyword != null) {
+        // Found a keyword match, now find the actual start of the keyword
+        int actualKeywordStart = lookBack - 1;
+        
+        // Look backwards to find the start of the keyword word
+        for (int i = actualKeywordStart; i >= 0 && i > actualKeywordStart - 100; i--) {
+          if (i < text.length) {
+            final String checkText = text.substring(i, cursorPos);
+            final String normalizedCheck = _normalizeWordForComparison(checkText).toLowerCase();
+            
+            if (normalizedCheck.startsWith(matchedKeyword)) {
+              if (i == 0 || _isWordBoundaryForAutocomplete(text[i - 1])) {
+                final String keywordFirstChar = matchedKeyword[0];
+                if (i < text.length && text[i].toLowerCase() == keywordFirstChar) {
+                  actualKeywordStart = i;
+                  break;
+                }
+              }
+            }
+          }
+        }
+        
+        keywordStart = actualKeywordStart;
+        break;
+      }
+      
+      lookBack--;
     }
-    while (end < text.length && !_isWordBoundaryForAutocomplete(text[end])) {
-      end++;
+    
+    // If we found a keyword, use it; otherwise use normal word detection
+    if (keywordStart < cursorPos) {
+      start = keywordStart;
+      end = cursorPos;
+      
+      // Make sure we don't go past a newline
+      int checkPos = start;
+      while (checkPos < end && checkPos < text.length) {
+        if (text[checkPos] == '\n') {
+          end = checkPos;
+          break;
+        }
+        checkPos++;
+      }
+    } else {
+      // Normal word detection
+      while (start > 0 && !_isWordBoundaryForAutocomplete(text[start - 1])) {
+        start--;
+      }
+      while (end < text.length && !_isWordBoundaryForAutocomplete(text[end])) {
+        end++;
+      }
     }
     
     _log('DEBUG: Replacing text from $start to $end (current word: "$currentWord") with "$suggestion"');
+    
+    // Normalize current word to handle spaces around "="
+    final String normalizedCurrentWord = _normalizeWordForComparison(currentWord);
     
     // Special handling for different suggestion types
     String replacementText = suggestion;
     int replacementStart = start;
     int replacementEnd = end;
     
-    if (suggestion.startsWith('mode=') && currentWord.startsWith('mode=')) {
-      // For mode= suggestions, only replace the value part after "mode="
+    if (suggestion.startsWith('mode=') && (normalizedCurrentWord.startsWith('mode=') || normalizedCurrentWord == 'mode')) {
+      // For mode= suggestions, only replace the value part after "mode=" (or "mode =")
       final String modeValue = suggestion.substring(5); // Remove "mode=" prefix
-      final int modeEqualsPos = currentWord.indexOf('=');
-      if (modeEqualsPos >= 0) {
-        replacementText = modeValue;
-        replacementStart = start + modeEqualsPos + 1; // Start after "mode="
-        replacementEnd = end;
-      }
-    } else if (currentWord.startsWith('options=')) {
-      // For options= suggestions, the suggestion is just the option part
-      // We need to handle comma-separated values correctly
-      final String currentOptionsValue = currentWord.substring(8); // Remove "options=" prefix
-      final int lastCommaIndex = currentOptionsValue.lastIndexOf(',');
       
-      if (lastCommaIndex >= 0) {
-        // There are existing options, add the new one after the comma
-        final String existingOptions = currentOptionsValue.substring(0, lastCommaIndex + 1);
-        replacementText = '$existingOptions$suggestion';
-        // Replace the entire options value part
-        replacementStart = start + 8; // Start after "options="
+      // Find the actual "=" position in the original text (accounting for spaces)
+      int equalsPos = start;
+      while (equalsPos < end && equalsPos < text.length) {
+        if (text[equalsPos] == '=') {
+          break;
+        }
+        equalsPos++;
+      }
+      
+      if (equalsPos < end && text[equalsPos] == '=') {
+        // Found "=", replace everything after it (including spaces)
+        replacementText = modeValue;
+        replacementStart = equalsPos + 1;
+        // Skip any spaces after "="
+        while (replacementStart < end && replacementStart < text.length && 
+               text[replacementStart] == ' ') {
+          replacementStart++;
+        }
         replacementEnd = end;
       } else {
-        // No existing options, just add the new option
+        // No "=" found, replace the entire word
         replacementText = suggestion;
-        replacementStart = start + 8; // Start after "options="
-        replacementEnd = end;
       }
-    } else if (currentWord.startsWith('cross_link=')) {
+    } else if (normalizedCurrentWord.startsWith('options=') || normalizedCurrentWord == 'options') {
+      // For options= suggestions, the suggestion is just the option part
+      // We need to handle comma-separated values correctly
+      // Find the actual "=" position in the original text (accounting for spaces)
+      int equalsPos = start;
+      while (equalsPos < end && equalsPos < text.length) {
+        if (text[equalsPos] == '=') {
+          break;
+        }
+        equalsPos++;
+      }
+      
+      if (equalsPos < end && text[equalsPos] == '=') {
+        // Found "=", get the value part after it
+        int valueStart = equalsPos + 1;
+        // Skip any spaces after "="
+        while (valueStart < end && valueStart < text.length && text[valueStart] == ' ') {
+          valueStart++;
+        }
+        
+        // Extract options value from normalized word for parsing
+        final int normalizedEqualsIndex = normalizedCurrentWord.indexOf('=');
+        final String currentOptionsValue = normalizedEqualsIndex >= 0 && normalizedEqualsIndex < normalizedCurrentWord.length - 1
+            ? normalizedCurrentWord.substring(normalizedEqualsIndex + 1)
+            : '';
+        
+        final int lastCommaIndex = currentOptionsValue.lastIndexOf(',');
+        
+        // Parse existing options to check for duplicates
+        final List<String> existingOptionsList = currentOptionsValue.split(',')
+            .map((e) => e.trim())
+            .where((e) => e.isNotEmpty)
+            .toList();
+        
+        final String suggestionName = suggestion.split(':').first;
+        final bool isAlreadyPresent = existingOptionsList.any((existing) => 
+            existing.split(':').first.toLowerCase() == suggestionName.toLowerCase());
+        
+        if (isAlreadyPresent) {
+          // Option already exists, find and replace the matching option
+          int optionIndex = -1;
+          for (int i = 0; i < existingOptionsList.length; i++) {
+            final String option = existingOptionsList[i];
+            final String optionName = option.split(':').first;
+            if (optionName.toLowerCase() == suggestionName.toLowerCase()) {
+              optionIndex = i;
+              break;
+            }
+          }
+          
+          if (optionIndex >= 0) {
+            // Calculate the start position of this option in the text
+            int optionStart = valueStart;
+            for (int j = 0; j < optionIndex; j++) {
+              // Find the option in the original text
+              int commaPos = currentOptionsValue.indexOf(',', optionStart - valueStart);
+              if (commaPos >= 0) {
+                optionStart = valueStart + commaPos + 1;
+                // Skip spaces after comma
+                while (optionStart < text.length && text[optionStart] == ' ') {
+                  optionStart++;
+                }
+              }
+            }
+            
+            // Find the end of this option (next comma or end)
+            int optionEnd = optionStart;
+            int commaInValue = currentOptionsValue.indexOf(',', optionStart - valueStart);
+            if (commaInValue >= 0) {
+              optionEnd = valueStart + commaInValue;
+            } else {
+              optionEnd = end;
+            }
+            
+            replacementText = suggestion;
+            replacementStart = optionStart;
+            replacementEnd = optionEnd;
+          }
+        } else if (lastCommaIndex >= 0) {
+          // There are existing options, add the new one after the last comma
+          // Check if there's a trailing comma (comma at the end of the value)
+          final bool hasTrailingComma = lastCommaIndex == currentOptionsValue.length - 1;
+          
+          if (hasTrailingComma) {
+            // Trailing comma means we're adding a new option after existing ones
+            // Replace from after the trailing comma to the end
+            replacementText = suggestion;
+            replacementStart = valueStart + lastCommaIndex + 1;
+            // Skip any spaces after comma
+            while (replacementStart < text.length && replacementStart < end && 
+                   text[replacementStart] == ' ') {
+              replacementStart++;
+            }
+            replacementEnd = end;
+          } else {
+            // Comma in the middle, replace the partial value after the last comma
+            replacementText = suggestion;
+            replacementStart = valueStart + lastCommaIndex + 1;
+            // Skip any spaces after comma
+            while (replacementStart < text.length && replacementStart < end && 
+                   text[replacementStart] == ' ') {
+              replacementStart++;
+            }
+            replacementEnd = end;
+          }
+        } else {
+          // No existing options or comma
+          if (currentOptionsValue.trim().isEmpty) {
+            // Empty value, just add the option
+            replacementText = suggestion;
+            replacementStart = valueStart;
+            replacementEnd = end;
+          } else {
+            // There's an existing value but no comma - append the new option with comma
+            // We need to replace the entire value with "existingValue, newValue"
+            replacementText = '$currentOptionsValue, $suggestion';
+            replacementStart = valueStart;
+            replacementEnd = end;
+          }
+        }
+      } else {
+        // No "=" found, replace the entire word
+        replacementText = suggestion;
+      }
+    } else if (normalizedCurrentWord.startsWith('cross_link=') || normalizedCurrentWord == 'cross_link') {
       // For cross_link= suggestions, handle step-by-step construction with comma support
-      final String currentCrossLinkValue = currentWord.substring(11); // Remove "cross_link=" prefix
-      
-      // Handle comma-separated rules - find the last comma to get the current partial rule
-      final int lastCommaIndex = currentCrossLinkValue.lastIndexOf(',');
-      String currentRule = currentCrossLinkValue;
-      String existingRules = '';
-      
-      if (lastCommaIndex >= 0) {
-        existingRules = currentCrossLinkValue.substring(0, lastCommaIndex + 1); // Include the comma
-        currentRule = currentCrossLinkValue.substring(lastCommaIndex + 1).trim();
+      // Find the actual "=" position in the original text (accounting for spaces)
+      int equalsPos = start;
+      while (equalsPos < end && equalsPos < text.length) {
+        if (text[equalsPos] == '=') {
+          break;
+        }
+        equalsPos++;
       }
       
-      final CrossLinkStepType stepType = _parseCrossLinkStep(currentRule);
-      
-      if (stepType == CrossLinkStepType.sourceSlot) {
-        // Step 1: Replace the current rule with the source slot
-        replacementText = existingRules + suggestion;
-        replacementStart = start + 11; // Start after "cross_link="
-        replacementEnd = end;
-      } else if (stepType == CrossLinkStepType.sourceReport) {
-        // Step 2: Add source report after source slot with /
-        final String sourceSlot = _extractSourceSlotFromCrossLink(currentRule);
-        replacementText = existingRules + '$sourceSlot/$suggestion' + ':';
-        replacementStart = start + 11; // Start after "cross_link="
-        replacementEnd = end;
-      } else if (stepType == CrossLinkStepType.sourceValue) {
-        // Step 3: Add source value after source report with :
-        final String sourcePart = currentRule.split('->')[0];
-        replacementText = existingRules + '$sourcePart:$suggestion';
-        replacementStart = start + 11; // Start after "cross_link="
-        replacementEnd = end;
-      } else if (stepType == CrossLinkStepType.targetSlot) {
-        // Step 4: Add target slot after source part with ->
-        final String sourcePart = currentRule.split('->')[0];
-        replacementText = existingRules + '$sourcePart->$suggestion';
-        replacementStart = start + 11; // Start after "cross_link="
-        replacementEnd = end;
-      } else if (stepType == CrossLinkStepType.targetCommand) {
-        // Step 5: Add target command after target slot with /
-        final String targetSlot = _extractTargetSlotFromCrossLink(currentRule);
-        final String sourcePart = currentRule.split('->')[0];
-        replacementText = existingRules + '$sourcePart->$targetSlot/$suggestion' + ':';
-        replacementStart = start + 11; // Start after "cross_link="
-        replacementEnd = end;
-      } else if (stepType == CrossLinkStepType.targetValue) {
-        // Step 6: Add target value after target command with =
-        final String targetPart = currentRule.split('->')[1];
-        final String sourcePart = currentRule.split('->')[0];
-        replacementText = existingRules + '$sourcePart->$targetPart=$suggestion';
-        replacementStart = start + 11; // Start after "cross_link="
-        replacementEnd = end;
+      if (equalsPos < end && text[equalsPos] == '=') {
+        // Found "=", get the value part after it
+        int valueStart = equalsPos + 1;
+        // Skip any spaces after "="
+        while (valueStart < end && valueStart < text.length && text[valueStart] == ' ') {
+          valueStart++;
+        }
+        
+        // Extract the cross_link value from the normalized word for parsing
+        final int normalizedEqualsIndex = normalizedCurrentWord.indexOf('=');
+        final String currentCrossLinkValue = normalizedEqualsIndex >= 0 && normalizedEqualsIndex < normalizedCurrentWord.length - 1
+            ? normalizedCurrentWord.substring(normalizedEqualsIndex + 1)
+            : '';
+        
+        // Handle comma-separated rules - find the last comma to get the current partial rule
+        final int lastCommaIndex = currentCrossLinkValue.lastIndexOf(',');
+        String currentRule = currentCrossLinkValue;
+        String existingRules = '';
+        
+        if (lastCommaIndex >= 0) {
+          existingRules = currentCrossLinkValue.substring(0, lastCommaIndex + 1); // Include the comma
+          currentRule = currentCrossLinkValue.substring(lastCommaIndex + 1).trim();
+        }
+        
+        final CrossLinkStepType stepType = _parseCrossLinkStep(currentRule);
+        
+        if (stepType == CrossLinkStepType.sourceSlot) {
+          // Step 1: Replace the current rule with the source slot
+          replacementText = existingRules + suggestion;
+          replacementStart = valueStart;
+          replacementEnd = end;
+        } else if (stepType == CrossLinkStepType.sourceReport) {
+          // Step 2: Add source report after source slot with /
+          final String sourceSlot = _extractSourceSlotFromCrossLink(currentRule);
+          replacementText = existingRules + '$sourceSlot/$suggestion' + ':';
+          replacementStart = valueStart;
+          replacementEnd = end;
+        } else if (stepType == CrossLinkStepType.sourceValue) {
+          // Step 3: Add source value after source report with :
+          final String sourcePart = currentRule.split('->')[0];
+          replacementText = existingRules + '$sourcePart:$suggestion';
+          replacementStart = valueStart;
+          replacementEnd = end;
+        } else if (stepType == CrossLinkStepType.targetSlot) {
+          // Step 4: Add target slot after source part with ->
+          final String sourcePart = currentRule.split('->')[0];
+          replacementText = existingRules + '$sourcePart->$suggestion';
+          replacementStart = valueStart;
+          replacementEnd = end;
+        } else if (stepType == CrossLinkStepType.targetCommand) {
+          // Step 5: Add target command after target slot with /
+          final String targetSlot = _extractTargetSlotFromCrossLink(currentRule);
+          final String sourcePart = currentRule.split('->')[0];
+          replacementText = existingRules + '$sourcePart->$targetSlot/$suggestion' + ':';
+          replacementStart = valueStart;
+          replacementEnd = end;
+        } else if (stepType == CrossLinkStepType.targetValue) {
+          // Step 6: Add target value after target command with =
+          final String targetPart = currentRule.split('->')[1];
+          final String sourcePart = currentRule.split('->')[0];
+          replacementText = existingRules + '$sourcePart->$targetPart=$suggestion';
+          replacementStart = valueStart;
+          replacementEnd = end;
+        }
+      } else {
+        // No "=" found, replace the entire word
+        replacementText = suggestion;
       }
     } else if (suggestion.startsWith('[') && suggestion.endsWith(']')) {
       // For chapter suggestions, replace the entire current word with the full suggestion
@@ -1687,7 +1936,7 @@ class _HomePageState extends State<HomePage> {
     _hideSuggestionOverlay();
     
     // If a mode was changed, refresh suggestions to update options= suggestions for the current SLOT
-    if (suggestion.startsWith('mode=') && currentWord.startsWith('mode=')) {
+    if (suggestion.startsWith('mode=') && (normalizedCurrentWord.startsWith('mode=') || normalizedCurrentWord == 'mode')) {
       // Use Future.microtask to ensure the text update is complete before refreshing
       Future.microtask(() {
         _updateAutocompleteSuggestions();
