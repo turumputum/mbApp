@@ -78,6 +78,8 @@ class _HomePageState extends State<HomePage> {
   List<String> _currentSuggestions = [];
   OverlayEntry? _suggestionOverlay;
   int _selectedSuggestionIndex = -1;
+  // Cache for current mode to avoid repeated parsing during description lookups
+  String? _cachedCurrentMode;
   bool _isRebuilding = false;
   bool _isLayoutInProgress = false;
   // Cached files loaded from removable drives when serial device is selected
@@ -1250,6 +1252,21 @@ class _HomePageState extends State<HomePage> {
     // Special handling for options= parameter - get option values from manifest based on current mode
     else if (lowerWord.startsWith('options=') || lowerWord == 'options') {
       _log('DEBUG: Options= logic triggered for: $lowerWord');
+      
+      // Cache current mode for efficient description lookups during overlay rebuilds
+      String? currentChapter = _getCurrentChapterFromTextEditor();
+      if (currentChapter != null) {
+        _cachedCurrentMode = _getModeFromTextEditor(currentChapter);
+        if (_cachedCurrentMode == null || _cachedCurrentMode!.isEmpty) {
+          _cachedCurrentMode = _parsedConfig[currentChapter]?['mode'];
+        }
+      } else if (_selectedChapter != null) {
+        _cachedCurrentMode = _getModeFromTextEditor(_selectedChapter!);
+        if (_cachedCurrentMode == null || _cachedCurrentMode!.isEmpty) {
+          _cachedCurrentMode = _parsedConfig[_selectedChapter!]?['mode'];
+        }
+      }
+      
       final List<String> optionSuggestions = _getOptionSuggestionsFromManifest();
       _log('DEBUG: Got ${optionSuggestions.length} option suggestions');
       String filterText = '';
@@ -2010,6 +2027,8 @@ class _HomePageState extends State<HomePage> {
     
     // If a mode was changed, refresh suggestions to update options= suggestions for the current SLOT
     if (suggestion.startsWith('mode=') && (normalizedCurrentWord.startsWith('mode=') || normalizedCurrentWord == 'mode')) {
+      // Clear cached mode since it may have changed
+      _cachedCurrentMode = null;
       // Use Future.microtask to ensure the text update is complete before refreshing
       Future.microtask(() {
         _updateAutocompleteSuggestions();
@@ -2039,7 +2058,21 @@ class _HomePageState extends State<HomePage> {
     if (suggestion.startsWith('[') && suggestion.endsWith(']')) {
       return 'Configuration section/chapter';
     } else if (suggestion.startsWith('mode=')) {
-      return 'Mode from manifest modes array';
+      // Extract mode value and get description from manifest
+      final String modeValue = suggestion.substring(5); // Remove "mode=" prefix
+      final String? description = _getModeDescriptionFromManifest(modeValue);
+      return description ?? 'Mode from manifest modes array';
+    } else if (suggestion.contains(':') && !suggestion.startsWith('SLOT_')) {
+      // This might be an option suggestion (format: "name:value")
+      // Only check if it's not a SLOT reference
+      final String optionName = suggestion.split(':').first.trim();
+      if (optionName.isNotEmpty) {
+        final String? description = _getOptionDescriptionFromManifest(optionName);
+        if (description != null && description.isNotEmpty) {
+          return description;
+        }
+      }
+      return 'Option from manifest';
     } else if (suggestion.endsWith('=')) {
       return 'Configuration key';
     } else if (suggestion.startsWith('SLOT_')) {
@@ -2049,6 +2082,105 @@ class _HomePageState extends State<HomePage> {
     } else {
       return 'Topic/Value from manifest';
     }
+  }
+  
+  /// Normalize description text by removing unnecessary spaces, line breaks, and escape symbols
+  String _normalizeDescription(String? description) {
+    if (description == null || description.isEmpty) {
+      return '';
+    }
+    
+    // Remove escape symbols (\n, \r, \t, etc.) and replace with spaces
+    String normalized = description
+        .replaceAll(RegExp(r'\\[nrtbf]'), ' ') // Replace \n, \r, \t, \b, \f with space
+        .replaceAll(RegExp(r'\\u[0-9a-fA-F]{4}'), ' ') // Replace unicode escapes with space
+        .replaceAll('\n', ' ') // Replace actual newlines
+        .replaceAll('\r', ' ') // Replace carriage returns
+        .replaceAll('\t', ' ') // Replace tabs
+        .replaceAll(RegExp(r'\s+'), ' ') // Replace multiple whitespace with single space
+        .trim(); // Remove leading/trailing whitespace
+    
+    return normalized;
+  }
+  
+  /// Get mode description from manifest
+  String? _getModeDescriptionFromManifest(String modeValue) {
+    try {
+      if (_manifestData.isNotEmpty && _manifestData.containsKey('modes') && _manifestData['modes'] is List) {
+        final List<dynamic> modesArray = _manifestData['modes'] as List<dynamic>;
+        
+        for (final dynamic modeItem in modesArray) {
+          if (modeItem is Map<String, dynamic>) {
+            final String? modeName = modeItem['mode']?.toString();
+            if (modeName == modeValue) {
+              final String? description = modeItem['description']?.toString();
+              if (description != null && description.isNotEmpty) {
+                return _normalizeDescription(description);
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Silent error handling
+    }
+    return null;
+  }
+  
+  /// Get option description from manifest for the current mode
+  /// Uses cached mode to avoid expensive text parsing on every call
+  String? _getOptionDescriptionFromManifest(String optionName) {
+    try {
+      // Use cached mode if available, otherwise get it fresh
+      String? currentMode = _cachedCurrentMode;
+      
+      if (currentMode == null || currentMode.isEmpty) {
+        // Cache miss - get the mode (but don't cache it here to avoid stale data)
+        String? currentChapter = _getCurrentChapterFromTextEditor();
+        
+        if (currentChapter != null) {
+          currentMode = _getModeFromTextEditor(currentChapter);
+          if (currentMode == null || currentMode.isEmpty) {
+            currentMode = _parsedConfig[currentChapter]?['mode'];
+          }
+        } else if (_selectedChapter != null) {
+          currentMode = _getModeFromTextEditor(_selectedChapter!);
+          if (currentMode == null || currentMode.isEmpty) {
+            currentMode = _parsedConfig[_selectedChapter!]?['mode'];
+          }
+        }
+      }
+      
+      if (currentMode != null && currentMode.isNotEmpty && _manifestData.isNotEmpty) {
+        if (_manifestData.containsKey('modes') && _manifestData['modes'] is List) {
+          final List<dynamic> modesArray = _manifestData['modes'] as List<dynamic>;
+          
+          for (final dynamic modeItem in modesArray) {
+            if (modeItem is Map<String, dynamic>) {
+              final String? modeName = modeItem['mode']?.toString();
+              if (modeName == currentMode && modeItem['options'] is List) {
+                final List<dynamic> modeOptions = modeItem['options'] as List<dynamic>;
+                
+                for (final dynamic option in modeOptions) {
+                  if (option is Map<String, dynamic>) {
+                    final String? name = option['name']?.toString();
+                    if (name == optionName) {
+                      final String? description = option['description']?.toString();
+                      if (description != null && description.isNotEmpty) {
+                        return _normalizeDescription(description);
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Silent error handling
+    }
+    return null;
   }
 
   /// Get mode suggestions from manifest modes array, filtered by slots field
@@ -2299,17 +2431,23 @@ class _HomePageState extends State<HomePage> {
         return KeyEventResult.handled;
       } else if (event.logicalKey == LogicalKeyboardKey.arrowDown && _suggestionOverlay != null && _currentSuggestions.isNotEmpty) {
         // Arrow down - navigate to next suggestion
-        if (_selectedSuggestionIndex < _currentSuggestions.length - 1) {
+        if (_selectedSuggestionIndex == -1) {
+          // First arrow key press - always select first suggestion
+          _selectedSuggestionIndex = 0;
+        } else if (_selectedSuggestionIndex < _currentSuggestions.length - 1) {
           _selectedSuggestionIndex++;
-          _updateSuggestionOverlay();
         }
+        _updateSuggestionOverlay();
         return KeyEventResult.handled;
       } else if (event.logicalKey == LogicalKeyboardKey.arrowUp && _suggestionOverlay != null && _currentSuggestions.isNotEmpty) {
         // Arrow up - navigate to previous suggestion
-        if (_selectedSuggestionIndex > 0) {
+        if (_selectedSuggestionIndex == -1) {
+          // First arrow key press - always select first suggestion
+          _selectedSuggestionIndex = 0;
+        } else if (_selectedSuggestionIndex > 0) {
           _selectedSuggestionIndex--;
-          _updateSuggestionOverlay();
         }
+        _updateSuggestionOverlay();
         return KeyEventResult.handled;
       }
     }
