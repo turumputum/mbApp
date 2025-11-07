@@ -2055,6 +2055,8 @@ class _HomePageState extends State<HomePage> {
 
   /// Get suggestion context description
   String _getSuggestionContext(String suggestion) {
+    final String? currentWord = _currentWord;
+
     if (suggestion.startsWith('[') && suggestion.endsWith(']')) {
       return 'Configuration section/chapter';
     } else if (suggestion.startsWith('mode=')) {
@@ -2062,6 +2064,39 @@ class _HomePageState extends State<HomePage> {
       final String modeValue = suggestion.substring(5); // Remove "mode=" prefix
       final String? description = _getModeDescriptionFromManifest(modeValue);
       return description ?? 'Mode from manifest modes array';
+    } else if (currentWord != null && (currentWord == 'cross_link' || currentWord.startsWith('cross_link='))) {
+      final String crossLinkValue = currentWord == 'cross_link' ? '' : currentWord.substring(11); // Remove 'cross_link=' prefix
+      final CrossLinkStepType stepType = _parseCrossLinkStep(crossLinkValue, logEnabled: false);
+
+      if (stepType == CrossLinkStepType.sourceSlot || stepType == CrossLinkStepType.targetSlot) {
+        final String? description = _getModeDescriptionForSlot(suggestion);
+        if (description != null && description.isNotEmpty) {
+          return description;
+        }
+        return 'Slot from manifest';
+      } else if (stepType == CrossLinkStepType.sourceReport) {
+        if (suggestion.isEmpty) {
+          return 'Source report';
+        }
+        final String sourceSlot = _extractSourceSlotFromCrossLink(crossLinkValue);
+        final String? description = _getSourceReportDescriptionFromManifest(sourceSlot, suggestion);
+        if (description != null && description.isNotEmpty) {
+          return description;
+        }
+        return 'Source report from manifest';
+      } else if (stepType == CrossLinkStepType.targetCommand) {
+        if (suggestion.isEmpty) {
+          return 'Target command';
+        }
+        final String targetSlot = _extractTargetSlotFromCrossLink(crossLinkValue);
+        final String? description = _getTargetCommandDescriptionFromManifest(targetSlot, suggestion);
+        if (description != null && description.isNotEmpty) {
+          return description;
+        }
+        return 'Target command from manifest';
+      }
+      // For other cross_link steps (e.g., values), fall through to default handling
+      return 'Cross link value';
     } else if (suggestion.contains(':') && !suggestion.startsWith('SLOT_')) {
       // This might be an option suggestion (format: "name:value")
       // Only check if it's not a SLOT reference
@@ -2102,6 +2137,32 @@ class _HomePageState extends State<HomePage> {
     
     return normalized;
   }
+
+  /// Get the mode value associated with a slot (handles complex slot identifiers)
+  String? _getModeForSlot(String slotName) {
+    if (slotName.isEmpty) {
+      return null;
+    }
+
+    final String actualSlot = _extractActualSlotFromComplex(slotName);
+
+    // Prioritize the text editor for real-time updates
+    String? modeValue = _getModeFromTextEditor(actualSlot, logEnabled: false);
+    if (modeValue == null || modeValue.isEmpty) {
+      modeValue = _parsedConfig[actualSlot]?['mode'];
+    }
+
+    return modeValue;
+  }
+
+  /// Get the mode description for a slot by combining slot lookup with manifest data
+  String? _getModeDescriptionForSlot(String slotName) {
+    final String? modeValue = _getModeForSlot(slotName);
+    if (modeValue == null || modeValue.isEmpty) {
+      return null;
+    }
+    return _getModeDescriptionFromManifest(modeValue);
+  }
   
   /// Get mode description from manifest
   String? _getModeDescriptionFromManifest(String modeValue) {
@@ -2139,12 +2200,12 @@ class _HomePageState extends State<HomePage> {
         String? currentChapter = _getCurrentChapterFromTextEditor();
         
         if (currentChapter != null) {
-          currentMode = _getModeFromTextEditor(currentChapter);
+          currentMode = _getModeFromTextEditor(currentChapter, logEnabled: false);
           if (currentMode == null || currentMode.isEmpty) {
             currentMode = _parsedConfig[currentChapter]?['mode'];
           }
         } else if (_selectedChapter != null) {
-          currentMode = _getModeFromTextEditor(_selectedChapter!);
+          currentMode = _getModeFromTextEditor(_selectedChapter!, logEnabled: false);
           if (currentMode == null || currentMode.isEmpty) {
             currentMode = _parsedConfig[_selectedChapter!]?['mode'];
           }
@@ -2173,6 +2234,99 @@ class _HomePageState extends State<HomePage> {
                   }
                 }
               }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Silent error handling
+    }
+    return null;
+  }
+
+  /// Get source report description from manifest for a given source slot and report topic
+  String? _getSourceReportDescriptionFromManifest(String sourceSlot, String reportTopic) {
+    try {
+      if (_manifestData.isEmpty || reportTopic.isEmpty) {
+        return null;
+      }
+
+      final String? modeValue = _getModeForSlot(sourceSlot);
+      if (modeValue == null || modeValue.isEmpty) {
+        return null;
+      }
+
+      if (_manifestData.containsKey('modes') && _manifestData['modes'] is List) {
+        final List<dynamic> modesArray = _manifestData['modes'] as List<dynamic>;
+
+        for (final dynamic modeItem in modesArray) {
+          if (modeItem is Map<String, dynamic>) {
+            final String? modeName = modeItem['mode']?.toString();
+
+            if (modeName == modeValue && modeItem['reports'] is List) {
+              final List<dynamic> reportsArray = modeItem['reports'] as List<dynamic>;
+
+              for (final dynamic report in reportsArray) {
+                if (report is Map<String, dynamic>) {
+                  final String? topic = report['topic']?.toString();
+                  if (topic == reportTopic || (topic != null && topic == '/$reportTopic')) {
+                    final String? description = report['description']?.toString();
+                    if (description != null && description.isNotEmpty) {
+                      return _normalizeDescription(description);
+                    }
+                  }
+                }
+              }
+              break;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Silent error handling
+    }
+    return null;
+  }
+
+  /// Get target command description from manifest for a given target slot and command name
+  String? _getTargetCommandDescriptionFromManifest(String targetSlot, String commandName) {
+    try {
+      if (_manifestData.isEmpty || targetSlot.isEmpty || commandName.isEmpty) {
+        return null;
+      }
+
+      final String actualSlot = _extractActualSlotFromComplex(targetSlot);
+      String? modeValue = _getModeFromTextEditor(actualSlot, logEnabled: false);
+      if (modeValue == null || modeValue.isEmpty) {
+        modeValue = _parsedConfig[actualSlot]?['mode'];
+      }
+
+      if (modeValue == null || modeValue.isEmpty) {
+        return null;
+      }
+
+      if (_manifestData.containsKey('modes') && _manifestData['modes'] is List) {
+        final List<dynamic> modesArray = _manifestData['modes'] as List<dynamic>;
+
+        for (final dynamic modeItem in modesArray) {
+          if (modeItem is Map<String, dynamic>) {
+            final String? modeName = modeItem['mode']?.toString();
+
+            if (modeName == modeValue && modeItem['commands'] is List) {
+              final List<dynamic> commandsArray = modeItem['commands'] as List<dynamic>;
+
+              for (final dynamic command in commandsArray) {
+                if (command is Map<String, dynamic>) {
+                  final String? cmd = command['command']?.toString();
+                  if (cmd == commandName) {
+                    final String? description = command['description']?.toString();
+                    if (description != null && description.isNotEmpty) {
+                      return _normalizeDescription(description);
+                    }
+                  }
+                }
+              }
+              break;
             }
           }
         }
@@ -2296,7 +2450,7 @@ class _HomePageState extends State<HomePage> {
 
   /// Get the mode value for a chapter directly from the text editor content
   /// Handles flexible spacing around "=" (e.g., "mode=", "mode =", "mode = ")
-  String? _getModeFromTextEditor(String chapterName) {
+  String? _getModeFromTextEditor(String chapterName, {bool logEnabled = true}) {
     final String text = _configEditorController.text;
     final List<String> lines = text.split('\n');
     
@@ -2319,7 +2473,9 @@ class _HomePageState extends State<HomePage> {
           final String key = trimmedLine.substring(0, equalIndex).trim();
           if (key.toLowerCase() == 'mode') {
             final String mode = trimmedLine.substring(equalIndex + 1).trim();
-            _log('DEBUG: Found mode in text editor for $chapterName: $mode');
+            if (logEnabled) {
+              _log('DEBUG: Found mode in text editor for $chapterName: $mode');
+            }
             return mode;
           }
         }
@@ -2331,7 +2487,9 @@ class _HomePageState extends State<HomePage> {
       }
     }
     
-    _log('DEBUG: No mode found in text editor for $chapterName');
+    if (logEnabled) {
+      _log('DEBUG: No mode found in text editor for $chapterName');
+    }
     return null;
   }
 
@@ -4077,17 +4235,23 @@ class _HomePageState extends State<HomePage> {
   }
 
   /// Parse cross link step to determine current step type
-  CrossLinkStepType _parseCrossLinkStep(String crossLinkValue) {
-    _log('DEBUG: _parseCrossLinkStep called with: "$crossLinkValue"');
+  CrossLinkStepType _parseCrossLinkStep(String crossLinkValue, {bool logEnabled = true}) {
+    if (logEnabled) {
+      _log('DEBUG: _parseCrossLinkStep called with: "$crossLinkValue"');
+    }
     
     if (crossLinkValue.isEmpty) {
-      _log('DEBUG: Empty cross link value, returning sourceSlot');
+      if (logEnabled) {
+        _log('DEBUG: Empty cross link value, returning sourceSlot');
+      }
       return CrossLinkStepType.sourceSlot;
     }
     
     // Check if we have source slot and looking for source report
     if (crossLinkValue.contains('/') && !crossLinkValue.contains('->')) {
-      _log('DEBUG: Found / without ->, returning sourceReport');
+      if (logEnabled) {
+        _log('DEBUG: Found / without ->, returning sourceReport');
+      }
       return CrossLinkStepType.sourceReport;
     }
     
@@ -4095,10 +4259,14 @@ class _HomePageState extends State<HomePage> {
     if (crossLinkValue.endsWith('/')) {
       // Check if we're in the source part (before ->) or target part (after ->)
       if (crossLinkValue.contains('->')) {
-        _log('DEBUG: Ends with / after ->, returning targetCommand - TRIGGERED BY / TYPING');
+        if (logEnabled) {
+          _log('DEBUG: Ends with / after ->, returning targetCommand - TRIGGERED BY / TYPING');
+        }
         return CrossLinkStepType.targetCommand;
       } else {
-        _log('DEBUG: Ends with / before ->, returning sourceReport - TRIGGERED BY / TYPING');
+        if (logEnabled) {
+          _log('DEBUG: Ends with / before ->, returning sourceReport - TRIGGERED BY / TYPING');
+        }
         return CrossLinkStepType.sourceReport;
       }
     }
