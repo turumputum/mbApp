@@ -2642,6 +2642,19 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         }
         _updateSuggestionOverlay();
         return KeyEventResult.handled;
+      } else if (_suggestionOverlay != null &&
+          _currentSuggestions.isNotEmpty &&
+          (
+            event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+            event.logicalKey == LogicalKeyboardKey.arrowRight ||
+            event.logicalKey == LogicalKeyboardKey.home ||
+            event.logicalKey == LogicalKeyboardKey.end ||
+            event.logicalKey == LogicalKeyboardKey.pageUp ||
+            event.logicalKey == LogicalKeyboardKey.pageDown
+          )) {
+        _hideSuggestionOverlay();
+        _selectedSuggestionIndex = -1;
+        return KeyEventResult.ignored;
       }
     }
     return KeyEventResult.ignored;
