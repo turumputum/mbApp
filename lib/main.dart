@@ -60,7 +60,7 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
   final List<DeviceItem> _devices = <DeviceItem>[];
   DeviceItem? _selected;
   bool _isScanning = false;
@@ -90,8 +90,15 @@ class _HomePageState extends State<HomePage> {
   
   // Configuration parsing
   Map<String, Map<String, String>> _parsedConfig = {};
+  Map<String, Map<String, String>> _originalParsedConfig = {};
   String? _selectedChapter;
   final Map<String, TextEditingController> _configControllers = {};
+  bool _isConfigEditorDirty = false;
+  bool _isConfigDesignDirty = false;
+  bool _suspendEditorDirtyTracking = false;
+  bool _suspendDesignDirtyTracking = false;
+  late final TabController _detailsTabController;
+  int _currentDetailsTabIndex = 0;
   
   // Manifest parsing for key suggestions
   Map<String, dynamic> _manifestData = {};
@@ -139,6 +146,8 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    _detailsTabController = TabController(length: 3, vsync: this);
+    _detailsTabController.addListener(_handleDetailsTabChange);
     _setupAutocompleteListener();
     _startScan();
   }
@@ -164,9 +173,15 @@ class _HomePageState extends State<HomePage> {
     _configEditorController.addListener(() {
       // Safety check to prevent assertion failures during widget rebuilds
       if (!mounted) return;
-      
       final String currentText = _configEditorController.text;
+
+      if (_suspendEditorDirtyTracking) {
+        _lastText = currentText;
+        return;
+      }
+      
       if (currentText != _lastText) {
+        _refreshEditorDirtyState(currentText: currentText);
         // Check if mode= was changed by comparing mode values in all SLOT chapters
         bool modeChanged = _detectModeChange(_lastText, currentText);
         
@@ -189,6 +204,33 @@ class _HomePageState extends State<HomePage> {
         });
       }
     });
+  }
+
+  void _handleDetailsTabChange() {
+    if (!_detailsTabController.indexIsChanging && _detailsTabController.index != _currentDetailsTabIndex) {
+      _currentDetailsTabIndex = _detailsTabController.index;
+      if (_currentDetailsTabIndex == 0) {
+        _syncEditorFromParsedConfig();
+      } else if (_currentDetailsTabIndex == 1) {
+        _refreshParsedConfigFromEditor();
+      }
+    }
+  }
+
+  void _refreshEditorDirtyState({String? currentText}) {
+    final String baseline = _cachedConfigContent ?? '';
+    final String comparedText = currentText ?? _configEditorController.text;
+    final bool newDirty = _cachedConfigContent == null ? false : comparedText != baseline;
+
+    if (_isConfigEditorDirty != newDirty) {
+      if (mounted) {
+        setState(() {
+          _isConfigEditorDirty = newDirty;
+        });
+      } else {
+        _isConfigEditorDirty = newDirty;
+      }
+    }
   }
   
   /// Detect if mode= value changed in any SLOT chapter
@@ -837,9 +879,7 @@ class _HomePageState extends State<HomePage> {
     if (item == null) {
       return const Center(child: Text('Select a device to see details'));
     }
-    return DefaultTabController(
-      length: 3,
-      child: Padding(
+    return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -849,30 +889,33 @@ class _HomePageState extends State<HomePage> {
           Text('Kind: ${item.kind}'),
           Text('Identifier: ${item.identifier}'),
           const SizedBox(height: 8),
-            const TabBar(
-              tabs: <Widget>[
-                Tab(text: 'Config edit'),
-                Tab(text: 'Config desig'),
-                Tab(text: 'Console'),
+          TabBar(
+            controller: _detailsTabController,
+            tabs: const <Widget>[
+              Tab(text: 'Config edit'),
+              Tab(text: 'Config desig'),
+              Tab(text: 'Console'),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: TabBarView(
+              controller: _detailsTabController,
+              children: <Widget>[
+                _buildConfigEditTab(item),
+                _buildConfigDesignTab(item),
+                _buildConsoleTab(item),
               ],
             ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: TabBarView(
-                children: <Widget>[
-                  _buildConfigEditTab(item),
-                  _buildConfigDesignTab(item),
-                  _buildConsoleTab(item),
-                ],
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildConfigDesignTab(DeviceItem item) {
+    final bool canSaveDesign = _isConfigDesignDirty && _cachedConfigPath != null;
+
     if (_parsedConfig.isEmpty) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -895,10 +938,7 @@ class _HomePageState extends State<HomePage> {
           const SizedBox(height: 12),
           Row(
             children: <Widget>[
-              FilledButton(
-                onPressed: null,
-                child: const Text('Save'),
-              ),
+              _buildSaveButton(null),
             ],
           ),
         ],
@@ -966,10 +1006,7 @@ class _HomePageState extends State<HomePage> {
         const SizedBox(height: 12),
         Row(
           children: <Widget>[
-            FilledButton(
-              onPressed: _saveConfigToFile,
-              child: const Text('Save'),
-            ),
+            _buildSaveButton(canSaveDesign ? _saveConfigToFile : null),
           ],
         ),
       ],
@@ -1087,17 +1124,15 @@ class _HomePageState extends State<HomePage> {
       );
     }
 
+    final bool canSaveEditor = _isConfigEditorDirty && _cachedConfigPath != null;
+
     return Column(
       children: <Widget>[
         // Save button at the top
         Row(
           mainAxisAlignment: MainAxisAlignment.end,
           children: <Widget>[
-            ElevatedButton.icon(
-              onPressed: _saveConfigFromEditor,
-              icon: const Icon(Icons.save),
-              label: const Text('Save'),
-            ),
+            _buildSaveButton(canSaveEditor ? _saveConfigFromEditor : null),
           ],
         ),
         const SizedBox(height: 8),
@@ -2631,11 +2666,9 @@ class _HomePageState extends State<HomePage> {
       final File configFile = File(_cachedConfigPath!);
       configFile.writeAsStringSync(newContent);
       
-      // Update cached content
-      _cachedConfigContent = newContent;
-      
       // Re-parse the config to update the parsed data
       _parseConfigFile(newContent);
+      _handleConfigPersisted(newContent);
       
       _log('Configuration saved successfully');
     } catch (e) {
@@ -2714,6 +2747,7 @@ class _HomePageState extends State<HomePage> {
     for (final TextEditingController controller in _configControllers.values) {
       controller.dispose();
     }
+    _detailsTabController.dispose();
     super.dispose();
   }
 
@@ -2831,7 +2865,7 @@ class _HomePageState extends State<HomePage> {
       _parseConfigFile(_cachedConfigContent!);
       
       // Initialize the text editor with the loaded content
-      _configEditorController.text = _cachedConfigContent!;
+      _synchronizeEditorWithCachedContent();
       // Rebuild cached suggestions with new config data
       _cachedSuggestions.clear();
       } else {
@@ -2953,7 +2987,7 @@ class _HomePageState extends State<HomePage> {
           _parseConfigFile(_cachedConfigContent!);
           
           // Initialize the text editor with the loaded content
-          _configEditorController.text = _cachedConfigContent!;
+          _synchronizeEditorWithCachedContent();
           // Rebuild cached suggestions with new config data
           _cachedSuggestions.clear();
           
@@ -3260,7 +3294,123 @@ class _HomePageState extends State<HomePage> {
     return null;
   }
 
-  void _parseConfigFile(String configContent) {
+  void _handleDesignControllerChanged(String chapter, String key, String newValue) {
+    if (_suspendDesignDirtyTracking) return;
+    if (!_parsedConfig.containsKey(chapter)) return;
+
+    final String? currentValue = _parsedConfig[chapter]?[key];
+    if (currentValue == newValue) {
+      return;
+    }
+
+    _parsedConfig[chapter]![key] = newValue;
+    _refreshDesignDirtyState();
+  }
+
+  Map<String, Map<String, String>> _cloneParsedConfig(Map<String, Map<String, String>> source) {
+    final Map<String, Map<String, String>> clone = <String, Map<String, String>>{};
+    for (final MapEntry<String, Map<String, String>> entry in source.entries) {
+      clone[entry.key] = Map<String, String>.from(entry.value);
+    }
+    return clone;
+  }
+
+  bool _areParsedConfigsEqual(Map<String, Map<String, String>> a, Map<String, Map<String, String>> b) {
+    if (a.length != b.length) {
+      return false;
+    }
+
+    for (final String chapter in a.keys) {
+      final Map<String, String>? aChapter = a[chapter];
+      final Map<String, String>? bChapter = b[chapter];
+      if (bChapter == null) {
+        return false;
+      }
+      if (aChapter!.length != bChapter.length) {
+        return false;
+      }
+      for (final String key in aChapter.keys) {
+        if (aChapter[key] != bChapter[key]) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  void _refreshDesignDirtyState() {
+    final bool newDirty = !_areParsedConfigsEqual(_parsedConfig, _originalParsedConfig);
+    if (_isConfigDesignDirty != newDirty) {
+      if (mounted) {
+        setState(() {
+          _isConfigDesignDirty = newDirty;
+        });
+      } else {
+        _isConfigDesignDirty = newDirty;
+      }
+    }
+  }
+
+  void _refreshParsedConfigFromEditor() {
+    final String editorContent = _configEditorController.text;
+    _parseConfigFile(editorContent, updateBaseline: false);
+  }
+
+  void _synchronizeEditorWithCachedContent() {
+    if (_cachedConfigContent == null) {
+      return;
+    }
+
+    _suspendEditorDirtyTracking = true;
+    _configEditorController.text = _cachedConfigContent!;
+    _lastText = _cachedConfigContent!;
+    _suspendEditorDirtyTracking = false;
+    _refreshEditorDirtyState();
+  }
+
+  void _handleConfigPersisted(String configContent) {
+    _cachedConfigContent = configContent;
+    _originalParsedConfig = _cloneParsedConfig(_parsedConfig);
+    _refreshDesignDirtyState();
+    _synchronizeEditorWithCachedContent();
+  }
+
+  String _buildConfigContentFromParsedConfig() {
+    final StringBuffer buffer = StringBuffer();
+    for (final String chapter in _parsedConfig.keys) {
+      buffer.writeln('[$chapter]');
+      for (final MapEntry<String, String> entry in _parsedConfig[chapter]!.entries) {
+        buffer.writeln('${entry.key}=${entry.value}');
+      }
+      buffer.writeln();
+    }
+    return buffer.toString();
+  }
+
+  void _syncEditorFromParsedConfig() {
+    final String configContent = _buildConfigContentFromParsedConfig();
+    if (_configEditorController.text == configContent) {
+      return;
+    }
+
+    _suspendEditorDirtyTracking = true;
+    _configEditorController.text = configContent;
+    _lastText = configContent;
+    _suspendEditorDirtyTracking = false;
+    _refreshEditorDirtyState(currentText: configContent);
+  }
+
+  Widget _buildSaveButton(VoidCallback? onPressed) {
+    return FilledButton.icon(
+      onPressed: onPressed,
+      icon: const Icon(Icons.save),
+      label: const Text('Save'),
+    );
+  }
+
+  void _parseConfigFile(String configContent, {bool updateBaseline = true}) {
+    final String? previousSelection = _selectedChapter;
     _parsedConfig.clear();
     _selectedChapter = null;
     
@@ -3299,8 +3449,14 @@ class _HomePageState extends State<HomePage> {
     
     // Set first chapter as selected if available
     if (_parsedConfig.isNotEmpty) {
-      _selectedChapter = _parsedConfig.keys.first;
+      if (previousSelection != null && _parsedConfig.containsKey(previousSelection)) {
+        _selectedChapter = previousSelection;
+      } else {
+        _selectedChapter = _parsedConfig.keys.first;
+      }
+      _suspendDesignDirtyTracking = true;
       _updateConfigControllers();
+      _suspendDesignDirtyTracking = false;
     }
     
     // Match wildcards after config is parsed
@@ -3308,6 +3464,11 @@ class _HomePageState extends State<HomePage> {
       _matchWildcardsToConfigChapters();
     }
     
+    if (updateBaseline) {
+      _originalParsedConfig = _cloneParsedConfig(_parsedConfig);
+    }
+    _refreshDesignDirtyState();
+
     _log('Parsed config with ${_parsedConfig.length} chapters');
   }
 
@@ -3316,15 +3477,27 @@ class _HomePageState extends State<HomePage> {
       return;
     }
     
+    for (final TextEditingController controller in _configControllers.values) {
+      controller.dispose();
+    }
+    _configControllers.clear();
+
     final Map<String, String> chapterData = _parsedConfig[_selectedChapter!]!;
+    final String chapter = _selectedChapter!;
     
     // Create controllers for this chapter
-    for (final String key in chapterData.keys) {
-      if (!_configControllers.containsKey(key)) {
-        _configControllers[key] = TextEditingController(text: chapterData[key]);
-      } else {
-        _configControllers[key]!.text = chapterData[key] ?? '';
-      }
+    for (final MapEntry<String, String> entry in chapterData.entries) {
+      final String key = entry.key;
+      final TextEditingController controller = TextEditingController(text: entry.value);
+      controller.addListener(() {
+        if (!mounted) return;
+        _handleDesignControllerChanged(chapter, key, controller.text);
+      });
+      _configControllers[key] = controller;
+    }
+
+    if (!_suspendDesignDirtyTracking) {
+      _refreshDesignDirtyState();
     }
   }
 
@@ -3511,6 +3684,8 @@ class _HomePageState extends State<HomePage> {
       _selectedChapter = chapterName;
       _updateConfigControllers();
     });
+
+    _refreshDesignDirtyState();
   }
 
   bool _isSlotChapterSelected() {
@@ -3580,6 +3755,7 @@ class _HomePageState extends State<HomePage> {
     });
     
     _log('Deleted SLOT chapter: $chapterToDelete');
+    _refreshDesignDirtyState();
   }
 
   void _showAddOptionDialog() {
@@ -3757,12 +3933,17 @@ class _HomePageState extends State<HomePage> {
       return;
     }
     
-    final String currentOptions = _configControllers['options']?.text ?? '';
+    final TextEditingController? optionsController = _configControllers['options'];
+    final String currentOptions = optionsController?.text ?? '';
     final String newOption = '$name:$value';
     final String newOptions = currentOptions.isEmpty ? newOption : '$currentOptions,$newOption';
     
-    _configControllers['options']?.text = newOptions;
-    _parsedConfig[_selectedChapter!]!['options'] = newOptions;
+    if (optionsController != null) {
+      optionsController.text = newOptions;
+    } else {
+      _parsedConfig[_selectedChapter!]!['options'] = newOptions;
+      _refreshDesignDirtyState();
+    }
     
     _log('Added option "$newOption" to options field');
   }
@@ -4625,11 +4806,16 @@ class _HomePageState extends State<HomePage> {
     // Combine source and target parts
     String rule = '$sourcePart->$targetPart';
     
-    final String currentCrossLink = _configControllers['cross_link']?.text ?? '';
+    final TextEditingController? crossLinkController = _configControllers['cross_link'];
+    final String currentCrossLink = crossLinkController?.text ?? '';
     final String newCrossLink = currentCrossLink.isEmpty ? rule : '$currentCrossLink,$rule';
     
-    _configControllers['cross_link']?.text = newCrossLink;
-    _parsedConfig[_selectedChapter!]!['cross_link'] = newCrossLink;
+    if (crossLinkController != null) {
+      crossLinkController.text = newCrossLink;
+    } else {
+      _parsedConfig[_selectedChapter!]!['cross_link'] = newCrossLink;
+      _refreshDesignDirtyState();
+    }
     
     _log('Added cross link rule: $rule (from complex source: $sourceSlot, target: $targetSlot${sourceReport != null ? ', report: $sourceReport' : ''}${sourceValue.isNotEmpty ? ', source value: $sourceValue' : ''}${targetCommand != null && targetCommand.isNotEmpty ? ', command: $targetCommand' : ''})');
   }
@@ -4767,9 +4953,12 @@ class _HomePageState extends State<HomePage> {
     }
 
     _parsedConfig[_selectedChapter!]![keyName] = value;
-    _configControllers[keyName] = TextEditingController(text: value);
-    setState(() {});
+
+    setState(() {
+      _updateConfigControllers();
+    });
     _log('Added new key: $keyName with value: $value');
+    _refreshDesignDirtyState();
   }
 
   void _deleteKeyValue(String key) {
@@ -4780,12 +4969,11 @@ class _HomePageState extends State<HomePage> {
     // Remove from parsed config
     _parsedConfig[_selectedChapter!]!.remove(key);
     
-    // Dispose and remove controller
-    _configControllers[key]?.dispose();
-    _configControllers.remove(key);
-    
-    setState(() {});
+    setState(() {
+      _updateConfigControllers();
+    });
     _log('Deleted key: $key');
+    _refreshDesignDirtyState();
   }
 
   Future<void> _saveConfigToFile() async {
@@ -4795,27 +4983,8 @@ class _HomePageState extends State<HomePage> {
     }
     
     try {
-      // Update parsed config with current controller values
-      if (_selectedChapter != null && _parsedConfig.containsKey(_selectedChapter)) {
-        for (final String key in _configControllers.keys) {
-          if (_parsedConfig[_selectedChapter!]!.containsKey(key)) {
-            _parsedConfig[_selectedChapter!]![key] = _configControllers[key]!.text;
-          }
-        }
-      }
-      
       // Rebuild config file content
-      final StringBuffer newConfig = StringBuffer();
-      
-      for (final String chapter in _parsedConfig.keys) {
-        newConfig.writeln('[$chapter]');
-        for (final MapEntry<String, String> entry in _parsedConfig[chapter]!.entries) {
-          newConfig.writeln('${entry.key}=${entry.value}');
-        }
-        newConfig.writeln(); // Empty line between chapters
-      }
-      
-      final String configContent = newConfig.toString();
+      final String configContent = _buildConfigContentFromParsedConfig();
       
       // Check if this is an FTP path (for UDP devices) or local path (for serial devices)
       if (_cachedConfigPath!.startsWith('ftp://')) {
@@ -4824,8 +4993,8 @@ class _HomePageState extends State<HomePage> {
       } else {
         // Save to local file
         await File(_cachedConfigPath!).writeAsString(configContent);
-        _cachedConfigContent = configContent;
-      _log('Configuration saved to $_cachedConfigPath');
+        _handleConfigPersisted(configContent);
+        _log('Configuration saved to $_cachedConfigPath');
       }
     } catch (e) {
       _log('Error saving configuration: $e');
@@ -4868,7 +5037,7 @@ class _HomePageState extends State<HomePage> {
       final bool uploaded = await ftpConnect.uploadFile(tempFile);
       
       if (uploaded) {
-        _cachedConfigContent = configContent;
+        _handleConfigPersisted(configContent);
         _log('FTP: Configuration saved successfully');
       } else {
         _log('FTP: Failed to upload configuration');
