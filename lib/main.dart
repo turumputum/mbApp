@@ -1663,7 +1663,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                             color: isSelected ? Colors.blue[700] : Colors.grey[600],
                           ),
                         ),
-                        onTap: () => _selectSuggestion(suggestion, currentWord),
+                        onTap: () => _selectSuggestion(suggestion, currentWord, fromMouseClick: true),
                         hoverColor: Colors.blue[50],
                       ),
                     );
@@ -1733,7 +1733,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
   /// Select a suggestion and insert it into the text
-  void _selectSuggestion(String suggestion, String currentWord) {
+  /// [fromMouseClick] if true, indicates the suggestion was selected via mouse click
+  void _selectSuggestion(String suggestion, String currentWord, {bool fromMouseClick = false}) {
     final String text = _configEditorController.text;
     final int cursorPos = _configEditorController.selection.baseOffset;
     
@@ -2075,6 +2076,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     );
     
     _hideSuggestionOverlay();
+    
+    // If selected via mouse click, return focus to the text editor
+    if (fromMouseClick) {
+      Future.microtask(() {
+        if (mounted) {
+          _configEditorFocusNode.requestFocus();
+        }
+      });
+    }
     
     // If a mode was changed, refresh suggestions to update options= suggestions for the current SLOT
     if (suggestion.startsWith('mode=') && (normalizedCurrentWord.startsWith('mode=') || normalizedCurrentWord == 'mode')) {
