@@ -73,6 +73,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   Timer? _autocompleteTimer;
   Timer? _overlayTimer;
   String _lastText = '';
+  TextSelection? _lastSelection;
   List<String> _cachedSuggestions = [];
   String? _currentWord;
   List<String> _currentSuggestions = [];
@@ -174,9 +175,21 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       // Safety check to prevent assertion failures during widget rebuilds
       if (!mounted) return;
       final String currentText = _configEditorController.text;
+      final TextSelection currentSelection = _configEditorController.selection;
 
       if (_suspendEditorDirtyTracking) {
         _lastText = currentText;
+        _lastSelection = currentSelection;
+        return;
+      }
+      
+      // Check if selection changed without text changing (mouse click)
+      if (currentText == _lastText && 
+          _lastSelection != null && 
+          currentSelection != _lastSelection &&
+          _suggestionOverlay != null) {
+        _hideSuggestionOverlay();
+        _lastSelection = currentSelection;
         return;
       }
       
@@ -186,6 +199,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         bool modeChanged = _detectModeChange(_lastText, currentText);
         
         _lastText = currentText;
+        _lastSelection = currentSelection;
         // Clear cached suggestions when text changes to refresh chapter suggestions
         _cachedSuggestions.clear();
         _autocompleteTimer?.cancel();
@@ -202,6 +216,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             }
           }
         });
+      } else {
+        _lastSelection = currentSelection;
       }
     });
   }
@@ -3378,6 +3394,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _suspendEditorDirtyTracking = true;
     _configEditorController.text = _cachedConfigContent!;
     _lastText = _cachedConfigContent!;
+    _lastSelection = _configEditorController.selection;
     _suspendEditorDirtyTracking = false;
     _refreshEditorDirtyState();
   }
@@ -3410,6 +3427,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _suspendEditorDirtyTracking = true;
     _configEditorController.text = configContent;
     _lastText = configContent;
+    _lastSelection = _configEditorController.selection;
     _suspendEditorDirtyTracking = false;
     _refreshEditorDirtyState(currentText: configContent);
   }
