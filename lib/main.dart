@@ -8,6 +8,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter_libserialport/flutter_libserialport.dart';
 import 'package:ftpconnect/ftpconnect.dart';
 import 'package:flutter/services.dart';
+import 'package:multicast_dns/multicast_dns.dart';
 
 /// Cross link step types for step-by-step construction
 enum CrossLinkStepType {
@@ -539,103 +540,135 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _log('Serial: scan finished.');
   }
 
+  /// Parse device name from strings like "FTP server on moduleBox 'my device'"
+  String? _parseDeviceNameFromString(String text) {
+    // Look for pattern: "FTP server on moduleBox 'device name'"
+    final RegExp pattern = RegExp(r"FTP server on moduleBox\s+'([^']+)'", caseSensitive: false);
+    final Match? match = pattern.firstMatch(text);
+    if (match != null && match.groupCount >= 1) {
+      return match.group(1);
+    }
+    return null;
+  }
+
   Future<void> _scanUdpBroadcasts() async {
     try {
-      _log('UDP: Getting network interfaces...');
+      _log('mDNS: Starting discovery...');
       
-      // Get all network interfaces
-      final List<NetworkInterface> interfaces = await NetworkInterface.list(
-        includeLoopback: false,
-        type: InternetAddressType.IPv4,
-      );
+      final MDnsClient client = MDnsClient();
+      await client.start();
       
-      _log('UDP: Found ${interfaces.length} network interface(s)');
-
       final List<DeviceItem> found = <DeviceItem>[];
       final Set<String> uniqueDeviceIds = <String>{}; // Track unique device identifiers
-      final List<RawDatagramSocket> sockets = <RawDatagramSocket>[];
       
-      // Create a socket for each interface and send broadcasts
-      for (final NetworkInterface interface in interfaces) {
-        for (final InternetAddress address in interface.addresses) {
-          try {
-            _log('UDP: Processing interface ${interface.name} with address ${address.address}');
+      try {
+        // Discover FTP services (common service type for FTP servers)
+        // Also try _modulebox._tcp in case it's a custom service type
+        final List<String> serviceTypes = ['_ftp._tcp', '_modulebox._tcp', '_http._tcp'];
+        
+        for (final String serviceType in serviceTypes) {
+          _log('mDNS: Discovering $serviceType services...');
+          
+          // Query for the specific service type
+          await for (final PtrResourceRecord ptr in client.lookup<PtrResourceRecord>(
+            ResourceRecordQuery.serverPointer(serviceType),
+          )) {
+            final String serviceName = ptr.domainName;
+            _log('mDNS: Found service: $serviceName');
             
-            // Create socket bound to this specific interface address
-            final RawDatagramSocket socket = await RawDatagramSocket.bind(address, 0);
-            socket.broadcastEnabled = true;
-            sockets.add(socket);
-            
-            // Calculate broadcast address for this interface
-            final String? broadcastAddress = _calculateBroadcastAddress(address.address);
-            final InternetAddress targetAddress = broadcastAddress != null
-                ? InternetAddress(broadcastAddress)
-                : InternetAddress('255.255.255.255');
-            
-            // Send 3 packets with 100ms delay between them
-            final List<int> data = utf8.encode('moduleBoxApp:getName');
-            for (int i = 0; i < 3; i++) {
-              socket.send(data, targetAddress, 9000);
-              if (broadcastAddress != null) {
-                _log('UDP: broadcast packet ${i + 1}/3 sent from ${interface.name} (${address.address}) to $broadcastAddress:9000');
-              } else {
-                _log('UDP: broadcast packet ${i + 1}/3 sent from ${interface.name} (${address.address}) to 255.255.255.255:9000 (fallback)');
+            // Get SRV record for the service to get host and port
+            await for (final SrvResourceRecord srv in client.lookup<SrvResourceRecord>(
+              ResourceRecordQuery.service(serviceName),
+            )) {
+              final String host = srv.target;
+              final int port = srv.port;
+              final String deviceId = '$host:$port';
+              
+              if (uniqueDeviceIds.contains(deviceId)) {
+                continue;
               }
               
-              // Wait 100ms before sending next packet (except for the last one)
-              if (i < 2) {
-                await Future<void>.delayed(const Duration(milliseconds: 100));
-              }
-            }
-            
-            // Set up listener for responses on this socket
-            socket.listen((RawSocketEvent event) {
-              if (event == RawSocketEvent.read) {
-                final Datagram? dg = socket.receive();
-                if (dg == null) return;
-                final String msg = _safeAscii(utf8.decode(dg.data, allowMalformed: true)).trim();
-                if (_isValidEnglish(msg) && msg.startsWith('moduleBoxApp:myNameIs')) {
-                  final String name = msg.substring('moduleBoxApp:myNameIs'.length).trim();
-                  final String host = dg.address.address;
-                  final int port = dg.port;
-                  final String deviceId = '$host:$port';
+              // Get TXT record for additional information (may contain device name)
+              String? deviceName;
+              try {
+                await for (final TxtResourceRecord txt in client.lookup<TxtResourceRecord>(
+                  ResourceRecordQuery.text(serviceName),
+                )) {
+                  // TxtResourceRecord.text can be String or List<String>
+                  String txtData;
+                  if (txt.text is List) {
+                    txtData = (txt.text as List).join(' ');
+                  } else {
+                    txtData = txt.text.toString();
+                  }
+                  _log('mDNS: TXT record for $serviceName: $txtData');
                   
-                  // Check if we already found this device using Set for efficient uniqueness check
-                  if (!uniqueDeviceIds.contains(deviceId)) {
-                    uniqueDeviceIds.add(deviceId);
-                    found.add(DeviceItem(
-                      displayName: '${name.isEmpty ? '(unnamed)' : name}',
-                      kind: 'udp',
-                      identifier: deviceId,
-                      extra: <String, Object?>{
-                        'raw': msg,
-                        'ip': host,
-                        'port': port,
-                        'interface': interface.name,
-                        'source_address': address.address,
-                      },
-                    ));
-                    _log('UDP: device "${name.isEmpty ? '(unnamed)' : name}" from $host:$port (via ${interface.name})');
+                  // Try to parse device name from TXT record
+                  final String? parsedName = _parseDeviceNameFromString(txtData);
+                  if (parsedName != null) {
+                    deviceName = parsedName;
+                    break;
                   }
                 }
+              } catch (e) {
+                _log('mDNS: Error reading TXT record for $serviceName: $e');
               }
-            });
-            
-          } catch (e) {
-            _log('UDP: Error processing interface ${interface.name} (${address.address}): $e');
+              
+              // If no device name found in TXT, try to extract from service name
+              if (deviceName == null || deviceName.isEmpty) {
+                // Try to parse from service name itself
+                final String? parsedName = _parseDeviceNameFromString(serviceName);
+                if (parsedName != null) {
+                  deviceName = parsedName;
+                } else {
+                  // Use service name as fallback (remove service type suffix)
+                  deviceName = serviceName.replaceAll('.$serviceType.local', '').replaceAll('.$serviceType', '');
+                }
+              }
+              
+              // Resolve hostname to IP address
+              String? ipAddress;
+              try {
+                final List<InternetAddress> addresses = await InternetAddress.lookup(host);
+                if (addresses.isNotEmpty) {
+                  ipAddress = addresses.first.address;
+                }
+              } catch (e) {
+                _log('mDNS: Error resolving hostname $host: $e');
+                // Try to use host as IP if it's already an IP address
+                if (RegExp(r'^\d+\.\d+\.\d+\.\d+$').hasMatch(host)) {
+                  ipAddress = host;
+                }
+              }
+              
+              if (ipAddress == null) {
+                _log('mDNS: Could not resolve IP for $host, skipping');
+                continue;
+              }
+              
+              uniqueDeviceIds.add(deviceId);
+              found.add(DeviceItem(
+                displayName: deviceName.isEmpty ? '(unnamed)' : deviceName,
+                kind: 'udp',
+                identifier: '$ipAddress:$port',
+                extra: <String, Object?>{
+                  'hostname': host,
+                  'ip': ipAddress,
+                  'port': port,
+                  'service_name': serviceName,
+                  'service_type': serviceType,
+                },
+              ));
+              _log('mDNS: device "${deviceName.isEmpty ? '(unnamed)' : deviceName}" from $ipAddress:$port (hostname: $host)');
+            }
           }
         }
-      }
-      
-      // Wait for responses (allow time after last packet is sent)
-      _log('UDP: Waiting for responses...');
-      await Future<void>.delayed(const Duration(seconds: 2));
-      
-      // Close all sockets
-      for (final RawDatagramSocket socket in sockets) {
-        try {
-          socket.close();
-        } catch (_) {}
+        
+        // Wait a bit for all responses
+        await Future<void>.delayed(const Duration(seconds: 2));
+        
+      } finally {
+        client.stop();
       }
       
       // Add found devices
@@ -643,9 +676,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         _addOrUpdateDevice(d);
       }
       
-      _log('UDP: scan finished. Found ${found.length} device(s) across ${interfaces.length} interface(s).');
+      _log('mDNS: scan finished. Found ${found.length} device(s).');
     } catch (e) {
-      _log('UDP: error: $e');
+      _log('mDNS: error: $e');
     }
   }
 
@@ -683,52 +716,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
     return b.toString();
   }
-
-  /// Calculate broadcast address for a given IP address.
-  /// Since we don't have subnet mask information from NetworkInterface,
-  /// we'll use common subnet patterns based on IP address ranges.
-  static String? _calculateBroadcastAddress(String ipAddress) {
-    try {
-      final List<String> parts = ipAddress.split('.');
-      if (parts.length != 4) return null;
-      
-      final int firstOctet = int.parse(parts[0]);
-      final int secondOctet = int.parse(parts[1]);
-      final int thirdOctet = int.parse(parts[2]);
-      
-      // Determine likely subnet mask based on IP address ranges
-      String broadcastAddress;
-      
-      if (firstOctet == 10) {
-        // Class A private: 10.0.0.0/8 (255.0.0.0)
-        broadcastAddress = '10.255.255.255';
-      } else if (firstOctet == 172 && secondOctet >= 16 && secondOctet <= 31) {
-        // Class B private: 172.16.0.0/12 (255.240.0.0)
-        broadcastAddress = '172.31.255.255';
-      } else if (firstOctet == 192 && secondOctet == 168) {
-        // Class C private: 192.168.0.0/16 (255.255.0.0)
-        broadcastAddress = '192.168.$thirdOctet.255';
-      } else if (firstOctet == 169 && secondOctet == 254) {
-        // Link-local: 169.254.0.0/16 (255.255.0.0)
-        broadcastAddress = '169.254.255.255';
-      } else if (firstOctet >= 192 && firstOctet <= 223) {
-        // Class C networks: assume /24 (255.255.255.0)
-        broadcastAddress = '$firstOctet.$secondOctet.$thirdOctet.255';
-      } else if (firstOctet >= 128 && firstOctet <= 191) {
-        // Class B networks: assume /16 (255.255.0.0)
-        broadcastAddress = '$firstOctet.$secondOctet.255.255';
-      } else {
-        // Class A networks or others: assume /8 (255.0.0.0)
-        broadcastAddress = '$firstOctet.255.255.255';
-      }
-      
-      return broadcastAddress;
-    } catch (e) {
-      // If parsing fails, return null to use fallback
-      return null;
-    }
-  }
-
 
   @override
   Widget build(BuildContext context) {

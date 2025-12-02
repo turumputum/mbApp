@@ -37,6 +37,7 @@ dependencies:
   flutter_libserialport: ^0.3.0
   ftpconnect: ^2.0.7
   flutter_quill: ^11.4.2
+  multicast_dns: ^0.3.2+2
 
 dev_dependencies:
   flutter_test:
