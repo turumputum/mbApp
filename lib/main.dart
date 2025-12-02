@@ -83,6 +83,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   int _selectedSuggestionIndex = -1;
   // Console autocomplete state
   final FocusNode _consoleInputFocusNode = FocusNode();
+  // Save button long-press state
+  bool _isSaveButtonLongPressed = false;
   List<String> _consoleSuggestions = [];
   String? _consoleCurrentWord;
   OverlayEntry? _consoleSuggestionOverlay;
@@ -2787,9 +2789,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
 
   Future<void> _saveConfigFromEditor() async {
+    await _saveConfigFromEditorWithResult();
+  }
+
+  /// Save config from editor and return true if successful
+  Future<bool> _saveConfigFromEditorWithResult() async {
     if (_cachedConfigPath == null) {
       _log('No config path available for saving');
-      return;
+      return false;
     }
 
     final String newContent = _configEditorController.text;
@@ -2802,6 +2809,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       if (_cachedConfigPath!.startsWith('ftp://')) {
         // Save to FTP server
         await _saveConfigToFtp(newContent);
+        return true;
       } else {
         // Save to local file
         final File configFile = File(_cachedConfigPath!);
@@ -2809,9 +2817,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         _handleConfigPersisted(newContent);
         
         _log('Configuration saved successfully');
+        return true;
       }
     } catch (e) {
       _log('Error saving configuration: $e');
+      return false;
     }
   }
 
@@ -3185,6 +3195,50 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       _log('Console: sent "$text" to ${_consolePort!.name}');
     } catch (e) {
       _log('Console: send error: $e');
+    }
+  }
+
+  /// Safely send restart command to serial port
+  /// Returns true if command was sent successfully, false otherwise
+  bool _sendRestartCommand() {
+    // Don't send restart command during device scanning
+    if (_isScanning) {
+      _log('Restart: Cannot send command during device scanning');
+      return false;
+    }
+
+    // Check if selected device is a serial device
+    if (_selected == null || _selected!.kind != 'serial') {
+      _log('Restart: Selected device is not a serial device');
+      return false;
+    }
+
+    // Check if console port exists and is open
+    if (_consolePort == null) {
+      _log('Restart: Console port is not initialized');
+      return false;
+    }
+
+    if (!_consolePort!.isOpen) {
+      _log('Restart: Console port is not open');
+      return false;
+    }
+
+    // Verify that the console port is connected to the selected device
+    if (_consolePort!.name != _selected!.identifier) {
+      _log('Restart: Console port (${_consolePort!.name}) does not match selected device (${_selected!.identifier})');
+      return false;
+    }
+
+    // Send the restart command
+    try {
+      final List<int> message = utf8.encode('system/restart\n');
+      _consolePort!.write(Uint8List.fromList(message));
+      _log('Restart: Successfully sent "system/restart" to ${_consolePort!.name}');
+      return true;
+    } catch (e) {
+      _log('Restart: Error sending command: $e');
+      return false;
     }
   }
 
@@ -3755,6 +3809,49 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
   Widget _buildSaveButton(VoidCallback? onPressed) {
+    // Check if this is for a serial device
+    final bool isSerialDevice = _selected?.kind == 'serial';
+    
+    // If serial device and has save callback, support long-press
+    if (isSerialDevice && onPressed != null) {
+      return GestureDetector(
+        onLongPressStart: (_) {
+          setState(() {
+            _isSaveButtonLongPressed = true;
+          });
+        },
+        onLongPressEnd: (_) async {
+          setState(() {
+            _isSaveButtonLongPressed = false;
+          });
+          
+          // Determine which save method to use based on current tab
+          bool saveSuccess = false;
+          if (_currentDetailsTabIndex == 0) {
+            // Config edit tab
+            saveSuccess = await _saveConfigFromEditorWithResult();
+          } else if (_currentDetailsTabIndex == 1) {
+            // Config design tab
+            saveSuccess = await _saveConfigToFileWithResult();
+          }
+          
+          // If save was successful, send restart command
+          if (saveSuccess) {
+            // Add a small delay to ensure file write is complete
+            await Future.delayed(const Duration(milliseconds: 100));
+            _sendRestartCommand();
+          }
+        },
+        child: FilledButton.icon(
+          // Disable regular press when long-pressing to prevent double-save
+          onPressed: _isSaveButtonLongPressed ? null : onPressed,
+          icon: const Icon(Icons.save),
+          label: Text(_isSaveButtonLongPressed ? 'Save/Restart' : 'Save'),
+        ),
+      );
+    }
+    
+    // Regular button for non-serial devices or when no callback
     return FilledButton.icon(
       onPressed: onPressed,
       icon: const Icon(Icons.save),
@@ -5330,9 +5427,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
   Future<void> _saveConfigToFile() async {
+    await _saveConfigToFileWithResult();
+  }
+
+  /// Save config to file and return true if successful
+  Future<bool> _saveConfigToFileWithResult() async {
     if (_cachedConfigPath == null) {
       _log('No config file path available for saving');
-      return;
+      return false;
     }
     
     try {
@@ -5343,14 +5445,17 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       if (_cachedConfigPath!.startsWith('ftp://')) {
         // Save to FTP server
         await _saveConfigToFtp(configContent);
+        return true;
       } else {
         // Save to local file
         await File(_cachedConfigPath!).writeAsString(configContent);
         _handleConfigPersisted(configContent);
         _log('Configuration saved to $_cachedConfigPath');
+        return true;
       }
     } catch (e) {
       _log('Error saving configuration: $e');
+      return false;
     }
   }
 
