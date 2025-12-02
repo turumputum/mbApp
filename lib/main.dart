@@ -73,6 +73,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   final ScrollController _textEditorScrollController = ScrollController();
   Timer? _autocompleteTimer;
   Timer? _overlayTimer;
+  Timer? _consoleAutocompleteTimer;
   String _lastText = '';
   TextSelection? _lastSelection;
   List<String> _cachedSuggestions = [];
@@ -80,6 +81,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   List<String> _currentSuggestions = [];
   OverlayEntry? _suggestionOverlay;
   int _selectedSuggestionIndex = -1;
+  // Console autocomplete state
+  final FocusNode _consoleInputFocusNode = FocusNode();
+  List<String> _consoleSuggestions = [];
+  String? _consoleCurrentWord;
+  OverlayEntry? _consoleSuggestionOverlay;
+  int _consoleSelectedSuggestionIndex = -1;
   // Cache for current mode to avoid repeated parsing during description lookups
   String? _cachedCurrentMode;
   bool _isRebuilding = false;
@@ -151,6 +158,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _detailsTabController = TabController(length: 3, vsync: this);
     _detailsTabController.addListener(_handleDetailsTabChange);
     _setupAutocompleteListener();
+    _setupConsoleAutocompleteListener();
     _startScan();
   }
 
@@ -232,6 +240,104 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         _refreshParsedConfigFromEditor();
       }
     }
+  }
+
+  /// Setup autocomplete listener for console input (crosslink suggestions starting from targetSlot)
+  void _setupConsoleAutocompleteListener() {
+    _consoleInputController.addListener(() {
+      if (!mounted) return;
+      
+      // Cancel any pending timer
+      _consoleAutocompleteTimer?.cancel();
+      
+      final String currentText = _consoleInputController.text;
+      
+      // Trigger suggestions based on patterns (without requiring "->")
+      // Pattern 1: Just text -> show target slots
+      // Pattern 2: "slot/" -> show target commands
+      // Pattern 3: "slot/command:" -> show target values
+      
+      if (currentText.isNotEmpty) {
+        // Delay to avoid showing suggestions during rapid typing
+        _consoleAutocompleteTimer = Timer(const Duration(milliseconds: 150), () {
+          if (!mounted) return;
+          
+          final List<String> suggestions = _getConsoleCrossLinkSuggestions(currentText);
+          if (suggestions.isNotEmpty) {
+            setState(() {
+              _consoleSuggestions = suggestions;
+              _consoleCurrentWord = currentText;
+            });
+            // Use Future.microtask to ensure widget tree is ready
+            Future.microtask(() {
+              if (mounted) {
+                _showConsoleSuggestionOverlay(suggestions, currentText);
+              }
+            });
+          } else {
+            _hideConsoleSuggestionOverlay();
+          }
+        });
+      } else {
+        _hideConsoleSuggestionOverlay();
+      }
+    });
+  }
+
+  /// Get crosslink suggestions for console input (starting from targetSlot step, without "->" trigger)
+  List<String> _getConsoleCrossLinkSuggestions(String input) {
+    final List<String> suggestions = <String>[];
+    
+    if (input.isEmpty) return suggestions;
+    
+    // Check if input contains "/" (indicating we might be looking for commands)
+    if (input.contains('/')) {
+      final List<String> parts = input.split('/');
+      if (parts.length >= 2) {
+        final String slotPart = parts[0];
+        final String afterSlash = parts[1];
+        
+        // Check if after "/" contains ":" (indicating we're looking for values)
+        if (afterSlash.contains(':')) {
+          // Pattern: "slot/command:" -> show target values
+          final List<String> valueParts = afterSlash.split(':');
+          final String valueFilter = valueParts.length > 1 ? valueParts[1] : '';
+          
+          final List<String> topicValues = _getTopicValuesFromSlotSilent(slotPart);
+          for (final String value in topicValues) {
+            if (valueFilter.isEmpty || value.toLowerCase().contains(valueFilter.toLowerCase())) {
+              if (value.toLowerCase() != valueFilter.toLowerCase()) {
+                suggestions.add(value);
+              }
+            }
+          }
+        } else {
+          // Pattern: "slot/" -> show target commands
+          final List<String> commands = _getTargetCommandsForSlot(slotPart);
+          for (final String command in commands) {
+            if (command.isNotEmpty) {
+              if (afterSlash.isEmpty || command.toLowerCase().contains(afterSlash.toLowerCase())) {
+                if (command.toLowerCase() != afterSlash.toLowerCase()) {
+                  suggestions.add(command);
+                }
+              }
+            }
+          }
+        }
+      }
+    } else {
+      // Pattern: just text -> show target slots
+      final List<String> targetSlots = _getTopicBasedSourceSlots();
+      for (final String slot in targetSlots) {
+        if (input.isEmpty || slot.toLowerCase().contains(input.toLowerCase())) {
+          if (slot.toLowerCase() != input.toLowerCase()) {
+            suggestions.add(slot);
+          }
+        }
+      }
+    }
+    
+    return suggestions;
   }
 
   void _refreshEditorDirtyState({String? currentText}) {
@@ -2768,7 +2874,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _configEditorController.dispose();
     _autocompleteTimer?.cancel();
     _overlayTimer?.cancel();
+    _consoleAutocompleteTimer?.cancel();
     _hideSuggestionOverlay();
+    _hideConsoleSuggestionOverlay();
+    _consoleInputController.dispose();
+    _consoleInputFocusNode.dispose();
     // Dispose config controllers
     for (final TextEditingController controller in _configControllers.values) {
       controller.dispose();
@@ -2778,6 +2888,210 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
   final TextEditingController _consoleInputController = TextEditingController();
+
+  /// Show console suggestion overlay
+  void _showConsoleSuggestionOverlay(List<String> suggestions, String currentWord) {
+    _hideConsoleSuggestionOverlay();
+    
+    if (suggestions.isEmpty) return;
+    if (!mounted) return;
+    
+    // Wait for next frame to ensure widget tree is ready
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _isRebuilding || _isLayoutInProgress) return;
+      
+      if (!_consoleInputFocusNode.hasFocus) {
+        _consoleInputFocusNode.requestFocus();
+        Future.delayed(const Duration(milliseconds: 50), () {
+          if (mounted && _consoleInputFocusNode.hasFocus) {
+            _showConsoleSuggestionOverlayInternal(suggestions, currentWord);
+          }
+        });
+        return;
+      }
+      
+      if (_consoleInputFocusNode.context == null) return;
+      
+      _showConsoleSuggestionOverlayInternal(suggestions, currentWord);
+    });
+  }
+  
+  /// Internal method to actually show the overlay
+  void _showConsoleSuggestionOverlayInternal(List<String> suggestions, String currentWord) {
+    if (!mounted) return;
+    
+    final RenderBox? focusBox = _consoleInputFocusNode.context?.findRenderObject() as RenderBox?;
+    if (focusBox == null) return;
+    
+    final Offset focusPosition = focusBox.localToGlobal(Offset.zero);
+    final double popupWidth = 300.0;
+    final double popupHeight = (suggestions.length * 40.0).clamp(80.0, 300.0);
+    
+    _consoleSuggestionOverlay = OverlayEntry(
+      builder: (overlayContext) {
+        final Size screenSize = MediaQuery.of(overlayContext).size;
+        final double popupX = focusPosition.dx.clamp(0.0, screenSize.width - popupWidth);
+        final double popupY = focusPosition.dy + focusBox.size.height + 4;
+        
+        return Positioned(
+          left: popupX,
+          top: popupY,
+          width: popupWidth,
+          child: Material(
+            elevation: 4,
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              constraints: BoxConstraints(maxHeight: popupHeight),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey[300]!),
+              ),
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: suggestions.length,
+                itemBuilder: (context, index) {
+                  final bool isSelected = index == _consoleSelectedSuggestionIndex;
+                  final String suggestion = suggestions[index];
+                  return ListTile(
+                    dense: true,
+                    selected: isSelected,
+                    title: Text(
+                      suggestion,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                      ),
+                    ),
+                    onTap: () => _selectConsoleSuggestion(suggestion, currentWord),
+                    hoverColor: Colors.blue[50],
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    
+    final BuildContext? overlayContext = _consoleInputFocusNode.context;
+    if (overlayContext != null && _consoleSuggestionOverlay != null && mounted) {
+      try {
+        Overlay.of(overlayContext).insert(_consoleSuggestionOverlay!);
+      } catch (e) {
+        _log('Console: Error inserting suggestion overlay: $e');
+        _consoleSuggestionOverlay = null;
+      }
+    } else if (mounted && _consoleSuggestionOverlay != null) {
+      try {
+        Overlay.of(context).insert(_consoleSuggestionOverlay!);
+      } catch (e) {
+        _log('Console: Error inserting suggestion overlay: $e');
+        _consoleSuggestionOverlay = null;
+      }
+    }
+  }
+
+  /// Hide console suggestion overlay
+  void _hideConsoleSuggestionOverlay() {
+    if (_consoleSuggestionOverlay != null) {
+      _consoleSuggestionOverlay!.remove();
+      _consoleSuggestionOverlay = null;
+    }
+    _consoleSelectedSuggestionIndex = -1;
+  }
+
+  /// Select a console suggestion
+  void _selectConsoleSuggestion(String suggestion, String currentWord) {
+    final String text = _consoleInputController.text;
+    
+    String newText = text;
+    
+    // Determine where to insert based on the pattern
+    if (text.contains('/')) {
+      final List<String> parts = text.split('/');
+      if (parts.length >= 2) {
+        final String slotPart = parts[0];
+        final String afterSlash = parts[1];
+        
+        if (afterSlash.contains(':')) {
+          // Pattern: "slot/command:" -> replace value part
+          final List<String> valueParts = afterSlash.split(':');
+          final String commandPart = valueParts[0];
+          newText = '$slotPart/$commandPart:$suggestion';
+        } else {
+          // Pattern: "slot/" -> replace command part
+          newText = '$slotPart/$suggestion';
+        }
+      }
+    } else {
+      // Pattern: just text -> replace with slot
+      newText = suggestion;
+    }
+    
+    _consoleInputController.value = _consoleInputController.value.copyWith(
+      text: newText,
+      selection: TextSelection.collapsed(offset: newText.length),
+    );
+    
+    _hideConsoleSuggestionOverlay();
+    Future.microtask(() {
+      _consoleInputFocusNode.requestFocus();
+    });
+  }
+
+  /// Handle keyboard events for console input suggestions
+  KeyEventResult _handleConsoleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.enter && 
+          _consoleSuggestionOverlay != null && 
+          _consoleSuggestions.isNotEmpty && 
+          _consoleSelectedSuggestionIndex >= 0) {
+        _selectConsoleSuggestion(
+          _consoleSuggestions[_consoleSelectedSuggestionIndex], 
+          _consoleCurrentWord ?? ''
+        );
+        return KeyEventResult.handled;
+      } else if (event.logicalKey == LogicalKeyboardKey.escape && 
+                 _consoleSuggestionOverlay != null) {
+        _hideConsoleSuggestionOverlay();
+        return KeyEventResult.handled;
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowDown && 
+                 _consoleSuggestionOverlay != null && 
+                 _consoleSuggestions.isNotEmpty) {
+        if (_consoleSelectedSuggestionIndex == -1) {
+          _consoleSelectedSuggestionIndex = 0;
+        } else if (_consoleSelectedSuggestionIndex < _consoleSuggestions.length - 1) {
+          _consoleSelectedSuggestionIndex++;
+        }
+        if (_consoleSuggestionOverlay != null) {
+          _consoleSuggestionOverlay!.markNeedsBuild();
+        }
+        return KeyEventResult.handled;
+      } else if (event.logicalKey == LogicalKeyboardKey.arrowUp && 
+                 _consoleSuggestionOverlay != null && 
+                 _consoleSuggestions.isNotEmpty) {
+        if (_consoleSelectedSuggestionIndex == -1) {
+          _consoleSelectedSuggestionIndex = 0;
+        } else if (_consoleSelectedSuggestionIndex > 0) {
+          _consoleSelectedSuggestionIndex--;
+        }
+        if (_consoleSuggestionOverlay != null) {
+          _consoleSuggestionOverlay!.markNeedsBuild();
+        }
+        return KeyEventResult.handled;
+      } else if (_consoleSuggestionOverlay != null &&
+                 (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+                  event.logicalKey == LogicalKeyboardKey.arrowRight ||
+                  event.logicalKey == LogicalKeyboardKey.home ||
+                  event.logicalKey == LogicalKeyboardKey.end ||
+                  event.logicalKey == LogicalKeyboardKey.pageUp ||
+                  event.logicalKey == LogicalKeyboardKey.pageDown)) {
+        _hideConsoleSuggestionOverlay();
+      }
+    }
+    return KeyEventResult.ignored;
+  }
 
   Widget _buildConsoleTab(DeviceItem item) {
     if (item.kind != 'serial') {
@@ -2821,14 +3135,18 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         Row(
           children: <Widget>[
             Expanded(
-              child: TextField(
-                controller: _consoleInputController,
-                decoration: const InputDecoration(
-                  hintText: 'Enter command...',
-                  border: OutlineInputBorder(),
-                  isDense: true,
+              child: Focus(
+                onKeyEvent: _handleConsoleKeyEvent,
+                child: TextField(
+                  controller: _consoleInputController,
+                  focusNode: _consoleInputFocusNode,
+                  decoration: const InputDecoration(
+                    hintText: 'Enter command...',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onSubmitted: (String text) => _sendToSerial(text),
                 ),
-                onSubmitted: (String text) => _sendToSerial(text),
               ),
             ),
             const SizedBox(width: 8),
