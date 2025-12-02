@@ -672,7 +672,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       try {
         // Discover FTP services (common service type for FTP servers)
         // Also try _modulebox._tcp in case it's a custom service type
-        final List<String> serviceTypes = ['_ftp._tcp', '_modulebox._tcp', '_http._tcp'];
+//        final List<String> serviceTypes = ['_ftp._tcp', '_modulebox._tcp', '_http._tcp'];
+        final List<String> serviceTypes = ['_ftp._tcp'];
         
         for (final String serviceType in serviceTypes) {
           _log('mDNS: Discovering $serviceType services...');
@@ -2882,6 +2883,28 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _consolePort = null;
   }
 
+  /// Invalidate current device selection
+  void _invalidateCurrentDevice() {
+    _log('Invalidate: Clearing device selection after restart command');
+    
+    // Stop console connection
+    _stopSerialConsole();
+    
+    // Clear device selection and related cached data
+    setState(() {
+      _selected = null;
+      _cachedConfigPath = null;
+      _cachedConfigContent = null;
+      _cachedManifestPath = null;
+      _cachedManifestContent = null;
+      _parsedConfig.clear();
+      _configEditorController.clear();
+      _selectedChapter = null;
+    });
+    
+    _log('Invalidate: Device selection cleared');
+  }
+
   @override
   void dispose() {
     _stopSerialConsole();
@@ -3235,6 +3258,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final List<int> message = utf8.encode('system/restart\n');
       _consolePort!.write(Uint8List.fromList(message));
       _log('Restart: Successfully sent "system/restart" to ${_consolePort!.name}');
+      
+      // Invalidate device after sending restart command
+      _invalidateCurrentDevice();
+      
       return true;
     } catch (e) {
       _log('Restart: Error sending command: $e');
