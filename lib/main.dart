@@ -49,7 +49,7 @@ class DeviceItem {
   });
 
   final String displayName; // e.g. MyBox (ttyUSB0)
-  final String kind; // "serial" | "udp"
+  final String kind; // "serial" | "mdns"
   final String identifier; // e.g. /dev/ttyUSB0 or 192.168.1.5:9000
   final Map<String, Object?> extra; // any details
 }
@@ -469,7 +469,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _log('Starting discovery…');
     await Future.wait(<Future<void>>[
       _scanSerialPorts(),
-      _scanUdpBroadcasts(),
+      _scanMdnsBroadcasts(),
     ]);
     setState(() {
       _isScanning = false;
@@ -551,7 +551,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     return null;
   }
 
-  Future<void> _scanUdpBroadcasts() async {
+  Future<void> _scanMdnsBroadcasts() async {
     try {
       _log('mDNS: Starting discovery...');
       
@@ -649,7 +649,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               uniqueDeviceIds.add(deviceId);
               found.add(DeviceItem(
                 displayName: deviceName.isEmpty ? '(unnamed)' : deviceName,
-                kind: 'udp',
+                kind: 'mDNS',
                 identifier: '$ipAddress:$port',
                 extra: <String, Object?>{
                   'hostname': host,
@@ -768,7 +768,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                                  // Load files based on device type
                                 if (item.kind == 'serial') {
                                   _loadDeviceFiles();
-                                 } else if (item.kind == 'udp') {
+                                 } else if (item.kind == 'mDNS') {
                                    _loadDeviceFilesFromFtp(item);
                                 }
                               },
@@ -2902,8 +2902,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
   }
 
-  Future<void> _loadDeviceFilesFromFtp(DeviceItem udpDevice) async {
-    _log('Loading device files from FTP server for UDP device: ${udpDevice.identifier}');
+  Future<void> _loadDeviceFilesFromFtp(DeviceItem mdnsDevice) async {
+    _log('Loading device files from FTP server for mDNS device: ${mdnsDevice.identifier}');
     _cachedManifestContent = null;
     _cachedConfigContent = null;
     _cachedManifestPath = null;
@@ -2911,7 +2911,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
     try {
       // Extract IP address from device identifier (format: "ip:port")
-      final String deviceIp = udpDevice.identifier.split(':')[0];
+      final String deviceIp = mdnsDevice.identifier.split(':')[0];
       
       _log('FTP: Connecting to $deviceIp:21 as anonymous');
       
@@ -5014,7 +5014,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       // Rebuild config file content
       final String configContent = _buildConfigContentFromParsedConfig();
       
-      // Check if this is an FTP path (for UDP devices) or local path (for serial devices)
+      // Check if this is an FTP path (for mDNS devices) or local path (for serial devices)
       if (_cachedConfigPath!.startsWith('ftp://')) {
         // Save to FTP server
         await _saveConfigToFtp(configContent);
@@ -5031,8 +5031,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   /// Save configuration to FTP server
   Future<void> _saveConfigToFtp(String configContent) async {
-    if (_selected == null || _selected!.kind != 'udp') {
-      _log('FTP save: No UDP device selected');
+    if (_selected == null || _selected!.kind != 'mDNS') {
+      _log('FTP save: No mDNS device selected');
       return;
     }
     
