@@ -2786,7 +2786,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
 
-  void _saveConfigFromEditor() {
+  Future<void> _saveConfigFromEditor() async {
     if (_cachedConfigPath == null) {
       _log('No config path available for saving');
       return;
@@ -2795,14 +2795,21 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final String newContent = _configEditorController.text;
     
     try {
-      final File configFile = File(_cachedConfigPath!);
-      configFile.writeAsStringSync(newContent);
-      
-      // Re-parse the config to update the parsed data
+      // Re-parse the config to update the parsed data first
       _parseConfigFile(newContent);
-      _handleConfigPersisted(newContent);
       
-      _log('Configuration saved successfully');
+      // Check if this is an FTP path (for mDNS devices) or local path (for serial devices)
+      if (_cachedConfigPath!.startsWith('ftp://')) {
+        // Save to FTP server
+        await _saveConfigToFtp(newContent);
+      } else {
+        // Save to local file
+        final File configFile = File(_cachedConfigPath!);
+        await configFile.writeAsString(newContent);
+        _handleConfigPersisted(newContent);
+        
+        _log('Configuration saved successfully');
+      }
     } catch (e) {
       _log('Error saving configuration: $e');
     }
@@ -5375,11 +5382,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       ftpConnect.transferMode = TransferMode.passive;
       _log('FTP: Passive mode enabled for save');
       
-      // Write config content to temporary file
-      final File tempFile = File('./temp_config_save.ini');
+      // Write config content to temporary file with the correct remote filename
+      final File tempFile = File('./config.ini');
       await tempFile.writeAsString(configContent);
       
-      // Upload to FTP server
+      // Upload to FTP server (remote filename will be 'config.ini' based on local filename)
       final bool uploaded = await ftpConnect.uploadFile(tempFile);
       
       if (uploaded) {
