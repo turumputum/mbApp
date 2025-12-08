@@ -2808,7 +2808,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       return false;
     }
 
-    final String newContent = _configEditorController.text;
+    String newContent = _configEditorController.text;
+    // Normalize line endings: replace Windows "\r\n" with Unix "\n"
+    newContent = newContent.replaceAll('\r\n', '\n');
     
     try {
       // Re-parse the config to update the parsed data first
@@ -3301,6 +3303,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       if (configPath != null) {
         _cachedConfigPath = configPath;
       _cachedConfigContent = await File(configPath).readAsString();
+      // Normalize line endings: replace Windows "\r\n" with Unix "\n"
+      _cachedConfigContent = _cachedConfigContent!.replaceAll('\r\n', '\n');
       _log('Loaded config.ini from: $configPath');
       _parseConfigFile(_cachedConfigContent!);
       
@@ -3423,6 +3427,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         if (configDownloaded && await tempConfigFile.exists()) {
           _cachedConfigPath = 'ftp://$deviceIp/config.ini';
           _cachedConfigContent = await tempConfigFile.readAsString();
+          // Normalize line endings: replace Windows "\r\n" with Unix "\n"
+          _cachedConfigContent = _cachedConfigContent!.replaceAll('\r\n', '\n');
           _log('FTP: Successfully downloaded config.ini (${_cachedConfigContent!.length} bytes)');
           _parseConfigFile(_cachedConfigContent!);
           
@@ -3820,11 +3826,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   String _buildConfigContentFromParsedConfig() {
     final StringBuffer buffer = StringBuffer();
     for (final String chapter in _parsedConfig.keys) {
-      buffer.writeln('[$chapter]');
+      buffer.write('[$chapter]\n');
       for (final MapEntry<String, String> entry in _parsedConfig[chapter]!.entries) {
-        buffer.writeln('${entry.key}=${entry.value}');
+        buffer.write('${entry.key}=${entry.value}\n');
       }
-      buffer.writeln();
+      buffer.write('\n');
     }
     return buffer.toString();
   }
