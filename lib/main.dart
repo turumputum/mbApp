@@ -1393,9 +1393,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           _log('DEBUG: Found comma, existing rules: "$existingRules", current rule: "$currentRule"');
         }
         
+        // Get the chapter where the cursor is located in the text editor
+        final String? currentChapterFromEditor = _getCurrentChapterFromTextEditor();
+        final String? chapterToUse = currentChapterFromEditor ?? _selectedChapter;
+        
         // Get suggestions for the current rule
-        final List<String> crossLinkSuggestions = _getCrossLinkStepByStepSuggestions('cross_link=$currentRule');
-        _log('DEBUG: Got ${crossLinkSuggestions.length} cross_link suggestions for current rule');
+        final List<String> crossLinkSuggestions = _getCrossLinkStepByStepSuggestions('cross_link=$currentRule', currentChapter: chapterToUse);
+        _log('DEBUG: @@ Got ${crossLinkSuggestions.length} cross_link suggestions for current rule');
         
         for (final String suggestion in crossLinkSuggestions) {
           suggestions.add(suggestion);
@@ -4648,7 +4652,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   /// Get topic-based complex values for source slot selection
   /// Format: topic_value_slot_number (e.g., sensor_data_1, control_signal_2)
-  List<String> _getTopicBasedSourceSlots() {
+  List<String> _getTopicBasedSourceSlots({String? filterSlotNumber}) {
     final List<String> complexSlots = <String>[];
     final Set<String> uniqueComplexSlots = <String>{};
     
@@ -4660,6 +4664,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         // Extract slot number from chapter name (e.g., "SLOT_1" -> "1")
         final String slotNumber = _extractSlotNumber(chapter);
         if (slotNumber.isEmpty) continue;
+        
+        // Filter by slot number if parameter provided
+        if (filterSlotNumber != null && filterSlotNumber.isNotEmpty) {
+          if (slotNumber != filterSlotNumber) {
+            continue;
+          }
+        }
         
         // Get topic values from this slot's options field
         final List<String> topicValues = _getTopicValuesFromSlotSilent(chapter);
@@ -4851,13 +4862,25 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
   /// Get step-by-step cross link suggestions based on current input
-  List<String> _getCrossLinkStepByStepSuggestions(String currentInput) {
+  List<String> _getCrossLinkStepByStepSuggestions(String currentInput, {String? currentChapter}) {
     final List<String> suggestions = <String>[];
     _log('DEBUG: _getCrossLinkStepByStepSuggestions called with: "$currentInput"');
-    
+
+      String currentSlotNumber = '';
+
+    _log('DEBUG: @@@@@@@@@@@@@@@@@@@@@@ stage 1 "$currentChapter"');
+
+    if (currentChapter != null && currentChapter.startsWith('SLOT_')) {
+        currentSlotNumber = _extractSlotNumber(currentChapter);
+    }
+
+    _log('DEBUG: @@@@@@@@@@@@@@@@@@@@@@ stage 2 "$currentSlotNumber"');
+
+
     if (currentInput == 'cross_link') {
       // Step 1: Show source slots
-      final List<String> sourceSlots = _getTopicBasedSourceSlots();
+
+      final List<String> sourceSlots = _getTopicBasedSourceSlots(filterSlotNumber: currentSlotNumber);
       for (final String slot in sourceSlots) {
         suggestions.add(slot);
       }
@@ -4870,7 +4893,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       switch (stepType) {
         case CrossLinkStepType.sourceSlot:
           // Step 1: Show source slots
-          final List<String> sourceSlots = _getTopicBasedSourceSlots();
+          final List<String> sourceSlots = _getTopicBasedSourceSlots(filterSlotNumber: currentSlotNumber);
           for (final String slot in sourceSlots) {
             if (slot.toLowerCase().contains(crossLinkValue.toLowerCase())) {
               // Don't suggest if it exactly matches what's already typed
