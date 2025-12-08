@@ -666,11 +666,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       //final MDnsClient client = MDnsClient();
 
       final MDnsClient client = MDnsClient(rawDatagramSocketFactory:
-    (dynamic host, int port,
+      (dynamic host, int port,
         {bool? reuseAddress, bool? reusePort, int? ttl}) {
-  return RawDatagramSocket.bind(host, port,
-      reuseAddress: true, reusePort: false, ttl: ttl!);
-});  
+      return RawDatagramSocket.bind(host, port,
+          reuseAddress: true, reusePort: Platform.isWindows ? false : true, ttl: ttl!);
+      });  
 
       await client.start();
       
