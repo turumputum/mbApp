@@ -87,6 +87,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   bool _isSaveButtonLongPressed = false;
   List<String> _consoleSuggestions = [];
   String? _consoleCurrentWord;
+  String? _consoleDeviceName;
   OverlayEntry? _consoleSuggestionOverlay;
   int _consoleSelectedSuggestionIndex = -1;
   // Cache for current mode to avoid repeated parsing during description lookups
@@ -3183,6 +3184,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       return const Center(child: Text('Console available for serial devices only'));
     }
 
+    // Store the current console device name
+    _consoleDeviceName = item.displayName;
+
     // Ensure the console is connected to current selection
     if (_consolePort == null || (_consolePort != null && _consolePort!.name != item.identifier)) {
       // Kick off (non-blocking) start
@@ -3219,6 +3223,17 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         // Input row at bottom
         Row(
           children: <Widget>[
+            if (_consoleDeviceName != null)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(
+                  '$_consoleDeviceName/',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+              ),
             Expanded(
               child: Focus(
                 onKeyEvent: _handleConsoleKeyEvent,
@@ -3257,10 +3272,21 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   void _sendToSerial(String text) {
     if (_consolePort == null || !_consolePort!.isOpen || text.isEmpty) return;
     try {
-      final List<int> message = utf8.encode('$text\n');
+      // Prefix command with device name and "/"
+      final String devicePrefix = _consoleDeviceName != null ? '$_consoleDeviceName/' : '';
+      final String fullCommand = '$devicePrefix$text';
+      
+      final List<int> message = utf8.encode('$fullCommand\n');
       _consolePort!.write(Uint8List.fromList(message));
+      
+      // Add "Sent: <command>" to console buffer
+      _consoleBuffer.writeln('Sent: "$fullCommand"');
+      
       _consoleInputController.clear();
-      _log('Console: sent "$text" to ${_consolePort!.name}');
+      _log('Console: sent "$fullCommand" to ${_consolePort!.name}');
+      
+      // Update UI to show the new console output
+      setState(() {});
     } catch (e) {
       _log('Console: send error: $e');
     }
