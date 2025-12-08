@@ -569,6 +569,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   Future<void> _startScan() async {
     if (_isScanning) return;
+    
+    // Close all open devices before starting new discovery
+    _closeAllDevices();
+    
     setState(() {
       _isScanning = true;
       _devices.clear();
@@ -2891,6 +2895,37 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     try { if (_consolePort?.isOpen == true) _consolePort?.close(); } catch (_) {}
     try { _consolePort?.dispose(); } catch (_) {}
     _consolePort = null;
+  }
+
+  /// Close all open devices and clear all related state
+  void _closeAllDevices() {
+    _log('Closing all open devices before re-discovery...');
+    
+    // Stop serial console connection
+    _stopSerialConsole();
+    
+    // Dispose of all config controllers
+    for (final TextEditingController controller in _configControllers.values) {
+      controller.dispose();
+    }
+    _configControllers.clear();
+    
+    // Clear device selection and related cached data
+    setState(() {
+      _selected = null;
+      _cachedConfigPath = null;
+      _cachedConfigContent = null;
+      _cachedManifestPath = null;
+      _cachedManifestContent = null;
+      _parsedConfig.clear();
+      _originalParsedConfig.clear();
+      _configEditorController.clear();
+      _selectedChapter = null;
+      _isConfigEditorDirty = false;
+      _isConfigDesignDirty = false;
+    });
+    
+    _log('All devices closed and state cleared');
   }
 
   /// Invalidate current device selection
