@@ -611,7 +611,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
         final Stopwatch sw = Stopwatch()..start();
         final List<int> buffer = <int>[];
-        while (sw.elapsedMilliseconds < 2000) {
+        while (sw.elapsedMilliseconds < 7000) {
           // Small delay to avoid busy wait
           await Future<void>.delayed(const Duration(milliseconds: 20));
           final int available = port.bytesAvailable;
@@ -2829,16 +2829,17 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       if (_cachedConfigPath!.startsWith('ftp://')) {
         // Save to FTP server
         await _saveConfigToFtp(newContent);
-        return true;
       } else {
         // Save to local file
         final File configFile = File(_cachedConfigPath!);
         await configFile.writeAsString(newContent);
         _handleConfigPersisted(newContent);
-        
         _log('Configuration saved successfully');
-        return true;
       }
+
+      // After a successful save, trigger re-discovery
+      await _startScan();
+      return true;
     } catch (e) {
       _log('Error saving configuration: $e');
       return false;
