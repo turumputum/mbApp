@@ -579,11 +579,26 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       _devices.clear();
       _selected = null;
     });
-    _log('Starting discovery…');
-    await Future.wait(<Future<void>>[
-      _scanSerialPorts(),
-      _scanMdnsBroadcasts(),
-    ]);
+    
+    const int maxAttempts = 3;
+    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+      _log('Starting discovery… (attempt $attempt/$maxAttempts)');
+      
+      await Future.wait(<Future<void>>[
+        _scanSerialPorts(),
+        _scanMdnsBroadcasts(),
+      ]);
+      
+      if (_devices.isNotEmpty) {
+        break; // Found devices, stop retrying
+      }
+      
+      if (attempt < maxAttempts) {
+        _log('No devices found, retrying discovery...');
+        await Future<void>.delayed(const Duration(seconds: 1));
+      }
+    }
+    
     setState(() {
       _isScanning = false;
     });
