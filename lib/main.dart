@@ -2826,19 +2826,29 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       _parseConfigFile(newContent);
       
       // Check if this is an FTP path (for mDNS devices) or local path (for serial devices)
+      bool saved = false;
       if (_cachedConfigPath!.startsWith('ftp://')) {
         // Save to FTP server
-        await _saveConfigToFtp(newContent);
+        saved = await _saveConfigToFtp(newContent);
       } else {
         // Save to local file
         final File configFile = File(_cachedConfigPath!);
         await configFile.writeAsString(newContent);
         _handleConfigPersisted(newContent);
         _log('Configuration saved successfully');
+        saved = true;
       }
 
-      // After a successful save, trigger re-discovery
-      await _startScan();
+      if (!saved) {
+        return false;
+      }
+
+      // After a successful save, trigger re-discovery (do not fail the save result if scan fails)
+      try {
+        await _startScan();
+      } catch (e) {
+        _log('Discovery after save failed: $e');
+      }
       return true;
     } catch (e) {
       _log('Error saving configuration: $e');
@@ -5570,15 +5580,17 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       // Check if this is an FTP path (for mDNS devices) or local path (for serial devices)
       if (_cachedConfigPath!.startsWith('ftp://')) {
         // Save to FTP server
-        await _saveConfigToFtp(configContent);
-        return true;
+        final bool saved = await _saveConfigToFtp(configContent);
+        if (!saved) {
+          return false;
+        }
       } else {
         // Save to local file
         await File(_cachedConfigPath!).writeAsString(configContent);
         _handleConfigPersisted(configContent);
         _log('Configuration saved to $_cachedConfigPath');
-        return true;
       }
+      return true;
     } catch (e) {
       _log('Error saving configuration: $e');
       return false;
@@ -5586,11 +5598,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
   /// Save configuration to FTP server
-  Future<void> _saveConfigToFtp(String configContent) async {
+  /// Returns true on success, false on failure
+  Future<bool> _saveConfigToFtp(String configContent) async {
     if (_selected == null || _selected!.kind != 'mDNS') {
       _log('FTP save: No mDNS device selected');
-      return;
+      return false;
     }
+    
+    bool success = false;
     
     try {
       // Extract IP address from device identifier (format: "ip:port")
@@ -5604,7 +5619,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       
       if (!connected) {
         _log('FTP: Failed to connect to $deviceIp:21 for save');
-        return;
+        return false;
       }
       
       _log('FTP: Successfully connected for save');
@@ -5623,8 +5638,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       if (uploaded) {
         _handleConfigPersisted(configContent);
         _log('FTP: Configuration saved successfully');
+        success = true;
       } else {
         _log('FTP: Failed to upload configuration');
+        success = false;
       }
       
       // Clean up temporary file
@@ -5640,7 +5657,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       
     } catch (e) {
       _log('FTP: Error saving configuration: $e');
+      success = false;
     }
+
+    return success;
   }
 }
 
