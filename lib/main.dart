@@ -218,7 +218,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         _autocompleteTimer = Timer(const Duration(milliseconds: 150), () {
           if (mounted) {
             _updateAutocompleteSuggestions();
-            // If mode changed and user is typing cross_link=, refresh suggestions
+            // If mode changed and user is typing crosslink=, refresh suggestions
             if (modeChanged) {
               Future.microtask(() {
                 if (mounted) {
@@ -454,7 +454,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     int keywordStart = cursorPos;
     int lookBack = cursorPos;
     
-    // Look backwards to find a known keyword (mode, options, cross_link)
+    // Look backwards to find a known keyword (mode, options, crosslink)
     // Increase lookback limit to handle longer option values
     final int maxLookback = 200;
     while (lookBack > 0 && lookBack > cursorPos - maxLookback) {
@@ -470,8 +470,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         matchedKeyword = 'mode';
       } else if (normalizedTest == 'options' || normalizedTest.startsWith('options=')) {
         matchedKeyword = 'options';
-      } else if (normalizedTest == 'cross_link' || normalizedTest.startsWith('cross_link=')) {
-        matchedKeyword = 'cross_link';
+      } else if (normalizedTest == 'crosslink' || normalizedTest.startsWith('crosslink=')) {
+        matchedKeyword = 'crosslink';
       }
       
       if (matchedKeyword != null) {
@@ -1177,7 +1177,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 final bool isSlotChapter = _selectedChapter != null && _selectedChapter!.startsWith('SLOT_');
                 final bool isModeKey = entry.key == 'mode' && isSlotChapter;
                 final bool isOptionsKey = entry.key == 'options' && isSlotChapter;
-                final bool isCrossLinkKey = entry.key == 'cross_link';
+                final bool isCrossLinkKey = entry.key == 'crosslink';
                 
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 12),
@@ -1390,12 +1390,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         }
       }
     }
-    // Special handling for cross_link= parameter - step by step rule construction
-    else if (lowerWord.startsWith('cross_link=') || lowerWord == 'cross_link') {
-      _log('DEBUG: Cross_link= logic triggered for: $lowerWord');
+    // Special handling for crosslink= parameter - step by step rule construction
+    else if (lowerWord.startsWith('crosslink=') || lowerWord == 'crosslink') {
+      _log('DEBUG: Crosslink= logic triggered for: $lowerWord');
       
-      if (lowerWord.startsWith('cross_link=')) {
-        final String crossLinkValue = lowerWord.substring(11); // Remove 'cross_link=' prefix
+      if (lowerWord.startsWith('crosslink=')) {
+        final String crossLinkValue = lowerWord.substring(11); // Remove 'crosslink=' prefix
         
         // Handle comma-separated rules - find the last comma to get the current partial rule
         final int lastCommaIndex = crossLinkValue.lastIndexOf(',');
@@ -1413,15 +1413,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         final String? chapterToUse = currentChapterFromEditor ?? _selectedChapter;
         
         // Get suggestions for the current rule
-        final List<String> crossLinkSuggestions = _getCrossLinkStepByStepSuggestions('cross_link=$currentRule', currentChapter: chapterToUse);
-        _log('DEBUG: @@ Got ${crossLinkSuggestions.length} cross_link suggestions for current rule');
+        final List<String> crossLinkSuggestions = _getCrossLinkStepByStepSuggestions('crosslink=$currentRule', currentChapter: chapterToUse);
+        _log('DEBUG: @@ Got ${crossLinkSuggestions.length} crosslink suggestions for current rule');
         
         for (final String suggestion in crossLinkSuggestions) {
           suggestions.add(suggestion);
-          _log('DEBUG: Added cross_link suggestion: "$suggestion"');
+          _log('DEBUG: Added crosslink suggestion: "$suggestion"');
         }
       } else {
-        // No cross_link= prefix, show source slots
+        // No crosslink= prefix, show source slots
         final List<String> sourceSlots = _getTopicBasedSourceSlots();
         for (final String slot in sourceSlots) {
           suggestions.add(slot);
@@ -1618,7 +1618,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     uniqueSuggestions.addAll([
       'mode=',
       'options=',
-      'cross_link=',
+      'crosslink=',
       'SLOT_',
       'trigger',
       'data',
@@ -1877,7 +1877,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     int keywordStart = cursorPos;
     int lookBack = cursorPos;
     
-    // Look backwards to find a known keyword (mode, options, cross_link)
+    // Look backwards to find a known keyword (mode, options, crosslink)
     final int maxLookback = 200;
     while (lookBack > 0 && lookBack > cursorPos - maxLookback) {
       final char = text[lookBack - 1];
@@ -1891,8 +1891,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         matchedKeyword = 'mode';
       } else if (normalizedTest == 'options' || normalizedTest.startsWith('options=')) {
         matchedKeyword = 'options';
-      } else if (normalizedTest == 'cross_link' || normalizedTest.startsWith('cross_link=')) {
-        matchedKeyword = 'cross_link';
+      } else if (normalizedTest == 'crosslink' || normalizedTest.startsWith('crosslink=')) {
+        matchedKeyword = 'crosslink';
       }
       
       if (matchedKeyword != null) {
@@ -2109,8 +2109,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         // No "=" found, replace the entire word
         replacementText = suggestion;
       }
-    } else if (normalizedCurrentWord.startsWith('cross_link=') || normalizedCurrentWord == 'cross_link') {
-      // For cross_link= suggestions, handle step-by-step construction with comma support
+    } else if (normalizedCurrentWord.startsWith('crosslink=') || normalizedCurrentWord == 'crosslink') {
+      // For crosslink= suggestions, handle step-by-step construction with comma support
       // Find the actual "=" position in the original text (accounting for spaces)
       int equalsPos = start;
       while (equalsPos < end && equalsPos < text.length) {
@@ -2128,7 +2128,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           valueStart++;
         }
         
-        // Extract the cross_link value from the normalized word for parsing
+        // Extract the crosslink value from the normalized word for parsing
         final int normalizedEqualsIndex = normalizedCurrentWord.indexOf('=');
         final String currentCrossLinkValue = normalizedEqualsIndex >= 0 && normalizedEqualsIndex < normalizedCurrentWord.length - 1
             ? normalizedCurrentWord.substring(normalizedEqualsIndex + 1)
@@ -2253,8 +2253,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final String modeValue = suggestion.substring(5); // Remove "mode=" prefix
       final String? description = _getModeDescriptionFromManifest(modeValue);
       return description ?? 'Mode from manifest modes array';
-    } else if (currentWord != null && (currentWord == 'cross_link' || currentWord.startsWith('cross_link='))) {
-      final String crossLinkValue = currentWord == 'cross_link' ? '' : currentWord.substring(11); // Remove 'cross_link=' prefix
+    } else if (currentWord != null && (currentWord == 'crosslink' || currentWord.startsWith('crosslink='))) {
+      final String crossLinkValue = currentWord == 'crosslink' ? '' : currentWord.substring(11); // Remove 'crosslink=' prefix
       final CrossLinkStepType stepType = _parseCrossLinkStep(crossLinkValue, logEnabled: false);
 
       if (stepType == CrossLinkStepType.sourceSlot || stepType == CrossLinkStepType.targetSlot) {
@@ -2284,7 +2284,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         }
         return 'Target command from manifest';
       }
-      // For other cross_link steps (e.g., values), fall through to default handling
+      // For other crosslink steps (e.g., values), fall through to default handling
       return 'Cross link value';
     } else if (suggestion.contains(':') && !suggestion.startsWith('SLOT_')) {
       // This might be an option suggestion (format: "name:value")
@@ -4903,15 +4903,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _log('DEBUG: @@@@@@@@@@@@@@@@@@@@@@ stage 2 "$currentSlotNumber"');
 
 
-    if (currentInput == 'cross_link') {
+    if (currentInput == 'crosslink') {
       // Step 1: Show source slots
 
       final List<String> sourceSlots = _getTopicBasedSourceSlots(filterSlotNumber: currentSlotNumber);
       for (final String slot in sourceSlots) {
         suggestions.add(slot);
       }
-    } else if (currentInput.startsWith('cross_link=')) {
-      final String crossLinkValue = currentInput.substring(11); // Remove 'cross_link=' prefix
+    } else if (currentInput.startsWith('crosslink=')) {
+      final String crossLinkValue = currentInput.substring(11); // Remove 'crosslink=' prefix
       _log('DEBUG: Cross link value: "$crossLinkValue"');
       final CrossLinkStepType stepType = _parseCrossLinkStep(crossLinkValue);
       _log('DEBUG: Detected step type: $stepType');
@@ -5407,14 +5407,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     // Combine source and target parts
     String rule = '$sourcePart->$targetPart';
     
-    final TextEditingController? crossLinkController = _configControllers['cross_link'];
+    final TextEditingController? crossLinkController = _configControllers['crosslink'];
     final String currentCrossLink = crossLinkController?.text ?? '';
     final String newCrossLink = currentCrossLink.isEmpty ? rule : '$currentCrossLink,$rule';
     
     if (crossLinkController != null) {
       crossLinkController.text = newCrossLink;
     } else {
-      _parsedConfig[_selectedChapter!]!['cross_link'] = newCrossLink;
+      _parsedConfig[_selectedChapter!]!['crosslink'] = newCrossLink;
       _refreshDesignDirtyState();
     }
     
