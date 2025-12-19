@@ -1395,7 +1395,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       _log('DEBUG: Crosslink= logic triggered for: $lowerWord');
       
       if (lowerWord.startsWith('crosslink=')) {
-        final String crossLinkValue = lowerWord.substring(11); // Remove 'crosslink=' prefix
+        final String crossLinkValue = lowerWord.substring(10); // Remove 'crosslink=' prefix
         
         // Handle comma-separated rules - find the last comma to get the current partial rule
         final int lastCommaIndex = crossLinkValue.lastIndexOf(',');
@@ -2254,7 +2254,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final String? description = _getModeDescriptionFromManifest(modeValue);
       return description ?? 'Mode from manifest modes array';
     } else if (currentWord != null && (currentWord == 'crosslink' || currentWord.startsWith('crosslink='))) {
-      final String crossLinkValue = currentWord == 'crosslink' ? '' : currentWord.substring(11); // Remove 'crosslink=' prefix
+      final String crossLinkValue = currentWord == 'crosslink' ? '' : currentWord.substring(10); // Remove 'crosslink=' prefix
       final CrossLinkStepType stepType = _parseCrossLinkStep(crossLinkValue, logEnabled: false);
 
       if (stepType == CrossLinkStepType.sourceSlot || stepType == CrossLinkStepType.targetSlot) {
@@ -4911,7 +4911,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         suggestions.add(slot);
       }
     } else if (currentInput.startsWith('crosslink=')) {
-      final String crossLinkValue = currentInput.substring(11); // Remove 'crosslink=' prefix
+      final String crossLinkValue = currentInput.substring(10); // Remove 'crosslink=' prefix
       _log('DEBUG: Cross link value: "$crossLinkValue"');
       final CrossLinkStepType stepType = _parseCrossLinkStep(crossLinkValue);
       _log('DEBUG: Detected step type: $stepType');
