@@ -74,6 +74,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   Timer? _autocompleteTimer;
   Timer? _overlayTimer;
   Timer? _consoleAutocompleteTimer;
+  Timer? _backgroundScanTimer;
   String _lastText = '';
   TextSelection? _lastSelection;
   List<String> _cachedSuggestions = [];
@@ -162,7 +163,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _detailsTabController.addListener(_handleDetailsTabChange);
     _setupAutocompleteListener();
     _setupConsoleAutocompleteListener();
-    _startScan();
+    _startBackgroundScanning();
   }
 
   @override
@@ -568,51 +569,63 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
   }
 
-  Future<void> _startScan() async {
-    if (_isScanning) return;
+  /// Start background scanning that runs continuously
+  void _startBackgroundScanning() {
+    _log('Starting background device discovery...');
     
-    // Close all open devices before starting new discovery
-    _closeAllDevices();
+    // Perform initial scan immediately
+    _performBackgroundScan();
+    
+    // Then scan periodically every 5 seconds
+    _backgroundScanTimer = Timer.periodic(const Duration(seconds: 5), (Timer timer) {
+      if (mounted) {
+        _performBackgroundScan();
+      } else {
+        timer.cancel();
+      }
+    });
+  }
+
+  /// Perform a single background scan cycle without clearing devices or interrupting current selection
+  Future<void> _performBackgroundScan() async {
+    if (!mounted) return;
+    
+    // Don't scan if we're already scanning (avoid overlapping scans)
+    if (_isScanning) return;
     
     setState(() {
       _isScanning = true;
-      _devices.clear();
-      _selected = null;
     });
     
-    const int maxAttempts = 3;
-    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-      _log('Starting discovery… (attempt $attempt/$maxAttempts)');
-      
+    try {
+      // Run both scans in parallel - they will add devices immediately via _addOrUpdateDevice
       await Future.wait(<Future<void>>[
         _scanSerialPorts(),
         _scanMdnsBroadcasts(),
       ]);
-      
-      if (_devices.isNotEmpty) {
-        break; // Found devices, stop retrying
-      }
-      
-      if (attempt < maxAttempts) {
-        _log('No devices found, retrying discovery...');
-        await Future<void>.delayed(const Duration(seconds: 1));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isScanning = false;
+        });
       }
     }
-    
-    setState(() {
-      _isScanning = false;
-    });
-    _log('Discovery complete. Found ${_devices.length} device(s).');
   }
 
   Future<void> _scanSerialPorts() async {
     final List<String> ports = SerialPort.availablePorts.toList(growable: false);
-    _log('Serial: ${ports.length} port(s) detected.');
+    //_log('Serial: ${ports.length} port(s) detected.');
     for (final String portName in ports) {
+      // Skip scanning if this port is currently open for console use
+      if (_consolePort != null && _consolePort!.name == portName) {
+        //_log('Serial: skipping $portName (in use by console)');
+        continue;
+      }
+      
       final SerialPort port = SerialPort(portName);
       try {
         if (!port.openReadWrite()) {
-          _log('Serial: cannot open $portName');
+          //_log('Serial: cannot open $portName');
           continue;
         }
 
@@ -622,7 +635,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
         final List<int> message = utf8.encode('Who are you?\n');
         port.write(Uint8List.fromList(message));
-        _log('Serial: sent probe to $portName');
+        //_log('Serial: sent probe to $portName');
 
         final Stopwatch sw = Stopwatch()..start();
         final List<int> buffer = <int>[];
@@ -648,16 +661,16 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   'baud': 115200,
                 },
               ));
-              _log('Serial: device "$display" on $portName');
+              //_log('Serial: device "$display" on $portName');
               break;
             }
           }
         }
         if (buffer.isEmpty) {
-          _log('Serial: timeout waiting response on $portName');
+          //_log('Serial: timeout waiting response on $portName');
         }
       } catch (e) {
-        _log('Serial: error on $portName: $e');
+        //_log('Serial: error on $portName: $e');
       } finally {
         try {
           if (port.isOpen) port.close();
@@ -665,7 +678,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         port.dispose();
       }
     }
-    _log('Serial: scan finished.');
+    //_log('Serial: scan finished.');
   }
 
   /// Parse device name from strings like "FTP server on moduleBox 'my device'"
@@ -681,7 +694,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   Future<void> _scanMdnsBroadcasts() async {
     try {
-      _log('mDNS: Starting discovery...');
+      //_log('mDNS: Starting discovery...');
       
       //final MDnsClient client = MDnsClient();
 
@@ -704,14 +717,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         final List<String> serviceTypes = ['_ftp._tcp'];
         
         for (final String serviceType in serviceTypes) {
-          _log('mDNS: Discovering $serviceType services...');
+          //_log('mDNS: Discovering $serviceType services...');
           
           // Query for the specific service type
           await for (final PtrResourceRecord ptr in client.lookup<PtrResourceRecord>(
             ResourceRecordQuery.serverPointer(serviceType),
           )) {
             final String serviceName = ptr.domainName;
-            _log('mDNS: Found service: $serviceName');
+            //_log('mDNS: Found service: $serviceName');
             
             // Get SRV record for the service to get host and port
             await for (final SrvResourceRecord srv in client.lookup<SrvResourceRecord>(
@@ -738,7 +751,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   } else {
                     txtData = txt.text.toString();
                   }
-                  _log('mDNS: TXT record for $serviceName: $txtData');
+                  //_log('mDNS: TXT record for $serviceName: $txtData');
                   
                   // Try to parse device name from TXT record
                   final String? parsedName = _parseDeviceNameFromString(txtData);
@@ -748,7 +761,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   }
                 }
               } catch (e) {
-                _log('mDNS: Error reading TXT record for $serviceName: $e');
+                //_log('mDNS: Error reading TXT record for $serviceName: $e');
               }
               
               // If no device name found in TXT, try to extract from service name
@@ -771,7 +784,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   ipAddress = addresses.first.address;
                 }
               } catch (e) {
-                _log('mDNS: Error resolving hostname $host: $e');
+                //_log('mDNS: Error resolving hostname $host: $e');
                 // Try to use host as IP if it's already an IP address
                 if (RegExp(r'^\d+\.\d+\.\d+\.\d+$').hasMatch(host)) {
                   ipAddress = host;
@@ -779,12 +792,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               }
               
               if (ipAddress == null) {
-                _log('mDNS: Could not resolve IP for $host, skipping');
+                //_log('mDNS: Could not resolve IP for $host, skipping');
                 continue;
               }
               
               uniqueDeviceIds.add(deviceId);
-              found.add(DeviceItem(
+              final DeviceItem d = DeviceItem(
                 displayName: deviceName.isEmpty ? '(unnamed)' : deviceName,
                 kind: 'mDNS',
                 identifier: '$ipAddress:$port',
@@ -795,31 +808,36 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   'service_name': serviceName,
                   'service_type': serviceType,
                 },
-              ));
-              _log('mDNS: device "${deviceName.isEmpty ? '(unnamed)' : deviceName}" from $ipAddress:$port (hostname: $host)');
+              );
+              _log('mDNS: adding/updating "${deviceName.isEmpty ? '(unnamed)' : deviceName}" from $ipAddress:$port (hostname: $host)');
+              _addOrUpdateDevice(d);
             }
           }
         }
         
         // Wait a bit for all responses
-        await Future<void>.delayed(const Duration(seconds: 2));
+        //await Future<void>.delayed(const Duration(seconds: 2));
         
       } finally {
         client.stop();
       }
       
-      // Add found devices
-      for (final DeviceItem d in found) {
-        _addOrUpdateDevice(d);
-      }
+      // // Add found devices
+      // for (final DeviceItem d in found) {
+      //   _addOrUpdateDevice(d);
+      // }
       
-      _log('mDNS: scan finished. Found ${found.length} device(s).');
+      //_log('mDNS: scan finished. Found ${found.length} device(s).');
     } catch (e) {
-      _log('mDNS: error: $e');
+      //_log('mDNS: error: $e');
     }
   }
 
   void _addOrUpdateDevice(DeviceItem device) {
+    // Save the currently selected device identifier to preserve selection
+    final String? selectedIdentifier = _selected?.identifier;
+    final String? selectedKind = _selected?.kind;
+    
     final int existing = _devices.indexWhere((DeviceItem d) => d.identifier == device.identifier && d.kind == device.kind);
     setState(() {
       if (existing >= 0) {
@@ -828,7 +846,21 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         _devices.add(device);
       }
       _devices.sort((DeviceItem a, DeviceItem b) => a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()));
-      _selected ??= _devices.isNotEmpty ? _devices.first : null;
+      
+      // Preserve the selected device if it still exists, otherwise select first device if none selected
+      if (selectedIdentifier != null && selectedKind != null) {
+        final int selectedIndex = _devices.indexWhere((DeviceItem d) => 
+          d.identifier == selectedIdentifier && d.kind == selectedKind);
+        if (selectedIndex >= 0) {
+          _selected = _devices[selectedIndex];
+        } else {
+          // Selected device was removed, but don't auto-select a new one
+          // Let user choose manually
+        }
+      } else {
+        // No device was selected, auto-select first if available
+        _selected ??= _devices.isNotEmpty ? _devices.first : null;
+      }
     });
   }
 
@@ -859,13 +891,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     return Scaffold(
       appBar: AppBar(
         title: const Text('Discovery'),
-        actions: <Widget>[
-          IconButton(
-            onPressed: _isScanning ? null : _startScan,
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Rescan',
-          ),
-        ],
       ),
       body: Stack(
         children: <Widget>[
@@ -2858,12 +2883,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         return false;
       }
 
-      // After a successful save, trigger re-discovery (do not fail the save result if scan fails)
-      try {
-        await _startScan();
-      } catch (e) {
-        _log('Discovery after save failed: $e');
-      }
+      // Background scanning will automatically pick up any device changes
       return true;
     } catch (e) {
       _log('Error saving configuration: $e');
@@ -2928,37 +2948,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _consolePort = null;
   }
 
-  /// Close all open devices and clear all related state
-  void _closeAllDevices() {
-    _log('Closing all open devices before re-discovery...');
-    
-    // Stop serial console connection
-    _stopSerialConsole();
-    
-    // Dispose of all config controllers
-    for (final TextEditingController controller in _configControllers.values) {
-      controller.dispose();
-    }
-    _configControllers.clear();
-    
-    // Clear device selection and related cached data
-    setState(() {
-      _selected = null;
-      _cachedConfigPath = null;
-      _cachedConfigContent = null;
-      _cachedManifestPath = null;
-      _cachedManifestContent = null;
-      _parsedConfig.clear();
-      _originalParsedConfig.clear();
-      _configEditorController.clear();
-      _selectedChapter = null;
-      _isConfigEditorDirty = false;
-      _isConfigDesignDirty = false;
-    });
-    
-    _log('All devices closed and state cleared');
-  }
-
   /// Invalidate current device selection
   void _invalidateCurrentDevice() {
     _log('Invalidate: Clearing device selection after restart command');
@@ -2983,6 +2972,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   @override
   void dispose() {
+    _backgroundScanTimer?.cancel();
     _stopSerialConsole();
     _consoleScrollController.dispose();
     _logsScrollController.dispose();
