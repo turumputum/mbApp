@@ -615,70 +615,82 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   Future<void> _scanSerialPorts() async {
     final List<String> ports = SerialPort.availablePorts.toList(growable: false);
     //_log('Serial: ${ports.length} port(s) detected.');
-    for (final String portName in ports) {
-      // Skip scanning if this port is currently open for console use
+    
+    // Filter out ports that are in use by console
+    final List<String> portsToScan = ports.where((String portName) {
       if (_consolePort != null && _consolePort!.name == portName) {
         //_log('Serial: skipping $portName (in use by console)');
-        continue;
+        return false;
       }
-      
-      final SerialPort port = SerialPort(portName);
-      try {
-        if (!port.openReadWrite()) {
-          //_log('Serial: cannot open $portName');
-          continue;
-        }
+      return true;
+    }).toList();
+    
+    // Scan all ports in parallel
+    await Future.wait(
+      portsToScan.map((String portName) => _scanSingleSerialPort(portName)),
+      eagerError: false, // Continue scanning other ports even if one fails
+    );
+    
+    //_log('Serial: scan finished.');
+  }
 
-        SerialPortConfig config = port.config; 
-        config.baudRate = 115200;
-        port.config = config;
+  /// Scan a single serial port for moduleBox devices
+  Future<void> _scanSingleSerialPort(String portName) async {
+    final SerialPort port = SerialPort(portName);
+    try {
+      if (!port.openReadWrite()) {
+        //_log('Serial: cannot open $portName');
+        return;
+      }
 
-        final List<int> message = utf8.encode('Who are you?\n');
-        port.write(Uint8List.fromList(message));
-        //_log('Serial: sent probe to $portName');
+      SerialPortConfig config = port.config; 
+      config.baudRate = 115200;
+      port.config = config;
 
-        final Stopwatch sw = Stopwatch()..start();
-        final List<int> buffer = <int>[];
-        while (sw.elapsedMilliseconds < 7000) {
-          // Small delay to avoid busy wait
-          await Future<void>.delayed(const Duration(milliseconds: 20));
-          final int available = port.bytesAvailable;
-          if (available > 0) {
-            final Uint8List readData = port.read(available);
-            buffer.addAll(readData);
-            final String data = _safeAscii(String.fromCharCodes(buffer));
-            final String trimmed = data.trim();
-            if (_isValidEnglish(trimmed) && trimmed.startsWith('moduleBox:')) {
-              final String name = trimmed.substring('moduleBox:'.length).trim();
-              final String display = name.isEmpty ? '(unnamed)' : name;
-              _addOrUpdateDevice(DeviceItem(
-                displayName: '$display',
-                kind: 'serial',
-                identifier: portName,
-                extra: <String, Object?>{
-                  'raw': trimmed,
-                  'port': portName,
-                  'baud': 115200,
-                },
-              ));
-              //_log('Serial: device "$display" on $portName');
-              break;
-            }
+      final List<int> message = utf8.encode('Who are you?\n');
+      port.write(Uint8List.fromList(message));
+      //_log('Serial: sent probe to $portName');
+
+      final Stopwatch sw = Stopwatch()..start();
+      final List<int> buffer = <int>[];
+      while (sw.elapsedMilliseconds < 7000) {
+        // Small delay to avoid busy wait
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        final int available = port.bytesAvailable;
+        if (available > 0) {
+          final Uint8List readData = port.read(available);
+          buffer.addAll(readData);
+          final String data = _safeAscii(String.fromCharCodes(buffer));
+          final String trimmed = data.trim();
+          if (_isValidEnglish(trimmed) && trimmed.startsWith('moduleBox:')) {
+            final String name = trimmed.substring('moduleBox:'.length).trim();
+            final String display = name.isEmpty ? '(unnamed)' : name;
+            _addOrUpdateDevice(DeviceItem(
+              displayName: '$display',
+              kind: 'serial',
+              identifier: portName,
+              extra: <String, Object?>{
+                'raw': trimmed,
+                'port': portName,
+                'baud': 115200,
+              },
+            ), "serial");
+            //_log('Serial: device "$display" on $portName');
+            break;
           }
         }
-        if (buffer.isEmpty) {
-          //_log('Serial: timeout waiting response on $portName');
-        }
-      } catch (e) {
-        //_log('Serial: error on $portName: $e');
-      } finally {
-        try {
-          if (port.isOpen) port.close();
-        } catch (_) {}
-        port.dispose();
       }
+      if (buffer.isEmpty) {
+        //_log('Serial: timeout waiting response on $portName');
+      }
+    } catch (e) {
+      //_log('Serial: error on $portName: $e');
+    } finally {
+      try {
+        if (port.isOpen) port.close();
+      } catch (_) {}
+      port.dispose();
     }
-    //_log('Serial: scan finished.');
   }
 
   /// Parse device name from strings like "FTP server on moduleBox 'my device'"
@@ -707,7 +719,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
       await client.start();
       
-      final List<DeviceItem> found = <DeviceItem>[];
       final Set<String> uniqueDeviceIds = <String>{}; // Track unique device identifiers
       
       try {
@@ -809,8 +820,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   'service_type': serviceType,
                 },
               );
-              _log('mDNS: adding/updating "${deviceName.isEmpty ? '(unnamed)' : deviceName}" from $ipAddress:$port (hostname: $host)');
-              _addOrUpdateDevice(d);
+              //_log('mDNS: adding/updating "${deviceName.isEmpty ? '(unnamed)' : deviceName}" from $ipAddress:$port (hostname: $host)');
+              _addOrUpdateDevice(d, "mdns");
             }
           }
         }
@@ -833,7 +844,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
   }
 
-  void _addOrUpdateDevice(DeviceItem device) {
+  void _addOrUpdateDevice(DeviceItem device, String channel) {
     // Save the currently selected device identifier to preserve selection
     final String? selectedIdentifier = _selected?.identifier;
     final String? selectedKind = _selected?.kind;
@@ -843,6 +854,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       if (existing >= 0) {
         _devices[existing] = device;
       } else {
+        _log('Found on ${device.identifier}');
+
         _devices.add(device);
       }
       _devices.sort((DeviceItem a, DeviceItem b) => a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase()));
