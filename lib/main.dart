@@ -430,7 +430,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final String text = _configEditorController.text;
     final int cursorPos = _configEditorController.selection.baseOffset;
     
-    _log('DEBUG: _updateAutocompleteSuggestions called, cursorPos: $cursorPos, text length: ${text.length}');
+    //_log('DEBUG: _updateAutocompleteSuggestions called, cursorPos: $cursorPos, text length: ${text.length}');
     
     if (cursorPos <= 0 || text.isEmpty) {
       _hideSuggestionOverlay();
@@ -530,14 +530,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
     
     String word = text.substring(start, end);
-    _log('DEBUG: Final word: "$word", length: ${word.length}');
-    _log('DEBUG: Text before cursor: "${text.substring(0, cursorPos)}"');
-    _log('DEBUG: Start: $start, End: $end, Cursor: $cursorPos');
+    //_log('DEBUG: Final word: "$word", length: ${word.length}');
+    //_log('DEBUG: Text before cursor: "${text.substring(0, cursorPos)}"');
+    //_log('DEBUG: Start: $start, End: $end, Cursor: $cursorPos');
     
     if (word.length >= 2) {
-      _log('DEBUG: Calling _getAutocompleteSuggestions with: "$word"');
+      //_log('DEBUG: Calling _getAutocompleteSuggestions with: "$word"');
       final List<String> suggestions = _getAutocompleteSuggestions(word);
-      _log('DEBUG: Got ${suggestions.length} suggestions');
+      //_log('DEBUG: Got ${suggestions.length} suggestions');
       if (mounted) {
         setState(() {
           _currentWord = word;
@@ -1403,16 +1403,16 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   List<String> _getAutocompleteSuggestions(String currentWord) {
     if (currentWord.isEmpty) return [];
     
-    _log('DEBUG: _getAutocompleteSuggestions called with: "$currentWord"');
+    //_log('DEBUG: _getAutocompleteSuggestions called with: "$currentWord"');
     // Normalize the word to handle spaces around "=" (e.g., "mode = " becomes "mode=")
     final String normalizedWord = _normalizeWordForComparison(currentWord);
     final String lowerWord = normalizedWord.toLowerCase();
-    _log('DEBUG: After normalization: "$normalizedWord" -> "$lowerWord"');
+    //_log('DEBUG: After normalization: "$normalizedWord" -> "$lowerWord"');
     final Set<String> suggestions = <String>{};
     
     // Special handling for mode= parameter - get mode values from manifest
     if (lowerWord.startsWith('mode=') || lowerWord == 'mode') {
-      _log('DEBUG: Mode condition matched! lowerWord: "$lowerWord"');
+      //_log('DEBUG: Mode condition matched! lowerWord: "$lowerWord"');
       final List<String> modeSuggestions = _getModeSuggestionsFromManifest();
       String filterText = '';
       
@@ -2703,7 +2703,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           if (key.toLowerCase() == 'mode') {
             final String mode = trimmedLine.substring(equalIndex + 1).trim();
             if (logEnabled) {
-              _log('DEBUG: Found mode in text editor for $chapterName: $mode');
+              //_log('DEBUG: Found mode in text editor for $chapterName: $mode');
             }
             return mode;
           }
@@ -3623,7 +3623,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   Future<String?> _findManifestFileInDir(Directory dir, {int maxDepth = 4}) async {
     if (maxDepth < 0) return null;
     try {
-	_log("Searching in $dir");
+	//_log("Searching in $dir");
       await for (final FileSystemEntity entity in dir.list(followLinks: false)) {
         final String path = entity.path;
         if (entity is File) {
@@ -3718,29 +3718,29 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       _chapterDescriptions.clear();
       _chapterWildcards.clear();
       
-      _log('Manifest data keys: ${_manifestData.keys.toList()}');
+      //_log('Manifest data keys: ${_manifestData.keys.toList()}');
       
       // Parse config array structure
       if (_manifestData.containsKey('config') && _manifestData['config'] is List) {
         final List<dynamic> configArray = _manifestData['config'] as List<dynamic>;
-        _log('Found config array with ${configArray.length} items');
+        //_log('Found config array with ${configArray.length} items');
         
         for (final dynamic configItem in configArray) {
           if (configItem is Map<String, dynamic>) {
             final String? chapter = configItem['chapter']?.toString();
             final String? description = configItem['description']?.toString();
-            _log('Processing chapter: $chapter with description: $description');
+            //_log('Processing chapter: $chapter with description: $description');
             
             if (chapter != null && configItem['values'] is List) {
               final List<dynamic> values = configItem['values'] as List<dynamic>;
               final List<String> keys = <String>[];
-              _log('Found ${values.length} values for chapter $chapter');
+              //_log('Found ${values.length} values for chapter $chapter');
               
               for (final dynamic valueItem in values) {
                 if (valueItem is Map<String, dynamic> && valueItem['key'] != null) {
                   final String key = valueItem['key'].toString();
                   keys.add(key);
-                  _log('Added key: $key');
+                  //_log('Added key: $key');
                 }
               }
               
@@ -3749,7 +3749,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               if (description != null) {
                 _chapterDescriptions[chapter] = description;
               }
-              _log('Chapter $chapter has keys: $keys');
+              //_log('Chapter $chapter has keys: $keys');
             }
           }
         }
@@ -3781,14 +3781,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         for (final String configChapter in _parsedConfig.keys) {
           if (regex.hasMatch(configChapter)) {
             _chapterWildcards[configChapter] = manifestChapter;
-            _log('Matched wildcard "$manifestChapter" to config chapter "$configChapter"');
+            //_log('Matched wildcard "$manifestChapter" to config chapter "$configChapter"');
           }
         }
       } else {
         // Direct match
         if (_parsedConfig.containsKey(manifestChapter)) {
           _chapterWildcards[manifestChapter] = manifestChapter;
-          _log('Direct match for chapter "$manifestChapter"');
+          //_log('Direct match for chapter "$manifestChapter"');
         }
       }
     }
@@ -3807,14 +3807,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final List<String> manifestKeys = _availableKeys[manifestChapter] ?? <String>[];
     final List<String> existingKeys = _parsedConfig[chapter]?.keys.toList() ?? <String>[];
     
-    _log('Available keys for chapter "$chapter" (from manifest "$manifestChapter"): $manifestKeys');
-    _log('Existing keys in config: $existingKeys');
+    //_log('Available keys for chapter "$chapter" (from manifest "$manifestChapter"): $manifestKeys');
+    //_log('Existing keys in config: $existingKeys');
     
     // Return keys that are in manifest but not in current config
     // Exclude SLOT_* keys as they cannot be added
     final List<String> availableKeys = manifestKeys.where((String key) => 
         !existingKeys.contains(key) && !key.startsWith('SLOT_')).toList();
-    _log('Filtered available keys (excluding SLOT_*): $availableKeys');
+    //_log('Filtered available keys (excluding SLOT_*): $availableKeys');
     
     return availableKeys;
   }
@@ -3981,9 +3981,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             // Config design tab
             saveSuccess = await _saveConfigToFileWithResult();
           }
-          
+          _log("save stage 1");
           // If save was successful, send restart command
           if (saveSuccess) {
+_log("save stage 2");
             // Add a small delay to ensure file write is complete
             await Future.delayed(const Duration(milliseconds: 100));
             _sendRestartCommand();
@@ -4066,7 +4067,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
     _refreshDesignDirtyState();
 
-    _log('Parsed config with ${_parsedConfig.length} chapters');
+    //_log('Parsed config with ${_parsedConfig.length} chapters');
   }
 
   void _updateConfigControllers() {
@@ -4864,7 +4865,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                         .replaceAll(RegExp(r'_+$'), '')       // Remove trailing underscores
                         .replaceAll(RegExp(r'_+'), '_');      // Replace multiple underscores with single
                     
-                    print('DEBUG: "$defaultValue" -> "$cleanValue"');
+                    //print('DEBUG: "$defaultValue" -> "$cleanValue"');
                     
                     // Check if the value already has underscore and number at the end
                     if (_hasUnderscoreAndNumberAtEnd(cleanValue)) {
