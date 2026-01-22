@@ -936,6 +936,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                               title: Text(item.displayName),
                               subtitle: Text('${item.kind} • ${item.identifier}'),
                               selected: selected,
+                              selectedTileColor: Theme.of(context).colorScheme.primaryContainer,
+                              selectedColor: Theme.of(context).colorScheme.onPrimaryContainer,
                               onTap: () {
                                 setState(() {
                                   _selected = item;
