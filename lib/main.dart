@@ -2772,13 +2772,23 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               for (final dynamic option in modeOptions) {
                 if (option is Map<String, dynamic>) {
                   final String? name = option['name']?.toString();
-                  final String? valueDefault = option['valueDefault']?.toString();
+                  final String valueType = option['valueType']?.toString() ?? 'string';
                   
-                  if (name != null && name.isNotEmpty && 
-                      valueDefault != null && valueDefault.isNotEmpty && valueDefault != 'null') {
-                    final String option = '$name:$valueDefault';
-                    optionSuggestions.add(option);
-                    _log('DEBUG: Added option: $option');
+                  if (name != null && name.isNotEmpty) {
+                    // Handle flag type: suggest both "yes" and "no"
+                    if (valueType == 'flag') {
+                      optionSuggestions.add('$name:yes');
+                      optionSuggestions.add('$name:no');
+                      _log('DEBUG: Added flag option: $name:yes and $name:no');
+                    } else {
+                      // For other types, use valueDefault
+                      final String? valueDefault = option['valueDefault']?.toString();
+                      if (valueDefault != null && valueDefault.isNotEmpty && valueDefault != 'null') {
+                        final String option = '$name:$valueDefault';
+                        optionSuggestions.add(option);
+                        _log('DEBUG: Added option: $option');
+                      }
+                    }
                   }
                 }
               }
