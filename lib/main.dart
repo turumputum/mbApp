@@ -647,21 +647,33 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       config.baudRate = 115200;
       port.config = config;
 
+      // Flush serial port data before sending probe
+      try {
+        final int available = port.bytesAvailable;
+        if (available > 0) {
+          port.read(available); // Read and discard any existing data
+        }
+      } catch (e) {
+        // Ignore errors during flush
+      }
+
       final List<int> message = utf8.encode('Who are you?\n');
       port.write(Uint8List.fromList(message));
-      //_log('Serial: sent probe to $portName');
+      _log('Serial: sent probe to $portName');
 
       final Stopwatch sw = Stopwatch()..start();
       final List<int> buffer = <int>[];
-      while (sw.elapsedMilliseconds < 7000) {
+      while (sw.elapsedMilliseconds < 2000) {
         // Small delay to avoid busy wait
         await Future<void>.delayed(const Duration(milliseconds: 20));
         final int available = port.bytesAvailable;
         if (available > 0) {
+          //_log('Serial: got "$available" bytes on $portName');
           final Uint8List readData = port.read(available);
           buffer.addAll(readData);
           final String data = _safeAscii(String.fromCharCodes(buffer));
           final String trimmed = data.trim();
+          _log('got "$trimmed" on $portName');
           if (_isValidEnglish(trimmed) && trimmed.startsWith('moduleBox:')) {
             final String name = trimmed.substring('moduleBox:'.length).trim();
             final String display = name.isEmpty ? '(unnamed)' : name;
@@ -675,7 +687,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 'baud': 115200,
               },
             ), "serial");
-            //_log('Serial: device "$display" on $portName');
+            _log('Serial: device "$display" on $portName');
             break;
           }
         }
@@ -2977,11 +2989,21 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   void _invalidateCurrentDevice() {
     //_log('Invalidate: Clearing device selection after restart command');
     
+    // Save device identifier before clearing selection
+    final String? deviceIdentifier = _selected?.identifier;
+    final String? deviceKind = _selected?.kind;
+    
     // Stop console connection
     _stopSerialConsole();
     
-    // Clear device selection and related cached data
+    // Remove device from list and clear device selection and related cached data
     setState(() {
+      // Remove the device from the list if it exists
+      if (deviceIdentifier != null && deviceKind != null) {
+        _devices.removeWhere((DeviceItem d) => 
+          d.identifier == deviceIdentifier && d.kind == deviceKind);
+      }
+      
       _selected = null;
       _cachedConfigPath = null;
       _cachedConfigContent = null;
@@ -3377,6 +3399,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       
       // Invalidate device after sending restart command
       _invalidateCurrentDevice();
+
+      // Restart device scan after a delay to allow device to reboot
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted) {
+          _performBackgroundScan();
+        }
+      });
       
       return true;
     } catch (e) {
