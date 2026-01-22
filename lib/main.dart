@@ -2975,7 +2975,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   /// Invalidate current device selection
   void _invalidateCurrentDevice() {
-    _log('Invalidate: Clearing device selection after restart command');
+    //_log('Invalidate: Clearing device selection after restart command');
     
     // Stop console connection
     _stopSerialConsole();
@@ -3341,10 +3341,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   /// Returns true if command was sent successfully, false otherwise
   bool _sendRestartCommand() {
     // Don't send restart command during device scanning
-    if (_isScanning) {
-      _log('Restart: Cannot send command during device scanning');
-      return false;
-    }
+    //if (_isScanning) {
+    //  _log('Restart: Cannot send command during device scanning');
+    //  return false;
+    //}
 
     // Check if selected device is a serial device
     if (_selected == null || _selected!.kind != 'serial') {
@@ -3981,10 +3981,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             // Config design tab
             saveSuccess = await _saveConfigToFileWithResult();
           }
-          _log("save stage 1");
+
           // If save was successful, send restart command
           if (saveSuccess) {
-_log("save stage 2");
+
             // Add a small delay to ensure file write is complete
             await Future.delayed(const Duration(milliseconds: 100));
             _sendRestartCommand();
