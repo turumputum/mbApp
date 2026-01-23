@@ -657,7 +657,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         // Ignore errors during flush
       }
 
-      final List<int> message = utf8.encode('Who are you?\n');
+      final List<int> message = utf8.encode('\nWho are you?\n');
       port.write(Uint8List.fromList(message));
       _log('Serial: sent probe to $portName');
 
