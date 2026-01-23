@@ -671,24 +671,34 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           //_log('Serial: got "$available" bytes on $portName');
           final Uint8List readData = port.read(available);
           buffer.addAll(readData);
+          
+          // Convert buffer to string and split by carriage return
           final String data = _safeAscii(String.fromCharCodes(buffer));
-          final String trimmed = data.trim();
-          _log('got "$trimmed" on $portName');
-          if (_isValidEnglish(trimmed) && trimmed.startsWith('moduleBox:')) {
-            final String name = trimmed.substring('moduleBox:'.length).trim();
-            final String display = name.isEmpty ? '(unnamed)' : name;
-            _addOrUpdateDevice(DeviceItem(
-              displayName: '$display',
-              kind: 'serial',
-              identifier: portName,
-              extra: <String, Object?>{
-                'raw': trimmed,
-                'port': portName,
-                'baud': 115200,
-              },
-            ), "serial");
-            _log('Serial: device "$display" on $portName');
-            break;
+          final List<String> lines = data.split('\n');
+          
+          // Analyze each line separately
+          for (final String line in lines) {
+            final String trimmed = line.trim();
+            if (trimmed.isEmpty) continue;
+            
+            _log('got "$trimmed" on $portName');
+            
+            if (_isValidEnglish(trimmed) && trimmed.startsWith('moduleBox:')) {
+              final String name = trimmed.substring('moduleBox:'.length).trim();
+              final String display = name.isEmpty ? '(unnamed)' : name;
+              _addOrUpdateDevice(DeviceItem(
+                displayName: '$display',
+                kind: 'serial',
+                identifier: portName,
+                extra: <String, Object?>{
+                  'raw': trimmed,
+                  'port': portName,
+                  'baud': 115200,
+                },
+              ), "serial");
+              _log('Serial: device "$display" on $portName');
+              return; // Exit function after finding device
+            }
           }
         }
       }
