@@ -5310,39 +5310,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       
       _log('DEBUG: Getting reports for source slot: "$sourceSlot"');
       
-      // Search for the source slot in mode options where name="topic"
-      String? sourceSlotMode;
-      _log('DEBUG: Searching in mode options for topic "$sourceSlot"');
-      
-      if (_manifestData.containsKey('modes') && _manifestData['modes'] is List) {
-        final List<dynamic> modesArray = _manifestData['modes'] as List<dynamic>;
-        
-        for (final dynamic modeItem in modesArray) {
-          if (modeItem is Map<String, dynamic>) {
-            final String? modeName = modeItem['mode']?.toString();
-            if (modeItem['options'] is List) {
-              final List<dynamic> optionsArray = modeItem['options'] as List<dynamic>;
-              
-              for (final dynamic option in optionsArray) {
-                if (option is Map<String, dynamic>) {
-                  final String? optionName = option['name']?.toString();
-                  final String? valueDefault = option['valueDefault']?.toString();
-                  
-                  // Check both "player_0" and "/player_0" formats
-                  if (optionName == 'topic' && 
-                      (valueDefault == sourceSlot || valueDefault == '/$sourceSlot')) {
-                    sourceSlotMode = modeName;
-                    _log('DEBUG: Found topic "$sourceSlot" in mode "$modeName" with valueDefault "$valueDefault"');
-                    break;
-                  }
-                }
-              }
-              if (sourceSlotMode != null) break;
-            }
-          }
-        }
-      }
-      
+      // Get mode for source slot using the standard method
+      final String? sourceSlotMode = _getModeForSlot(sourceSlot);
       _log('DEBUG: Mode for source slot "$sourceSlot": "$sourceSlotMode"');
       
       if (sourceSlotMode == null || sourceSlotMode.isEmpty) {
@@ -5399,11 +5368,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         return commands;
       }
       
-      // Extract the actual slot name from the complex target slot format
-      final String actualSlot = _extractActualSlotFromComplex(targetSlot);
-      
-      // Get the mode for the target slot
-      final String? modeValue = _parsedConfig[actualSlot]?['mode'];
+      // Get the mode for the target slot using the standard method
+      final String? modeValue = _getModeForSlot(targetSlot);
       if (modeValue == null || modeValue.isEmpty) {
         return commands;
       }
