@@ -91,6 +91,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   String? _consoleDeviceName;
   OverlayEntry? _consoleSuggestionOverlay;
   int _consoleSelectedSuggestionIndex = -1;
+  // Console command history
+  List<String> _consoleHistory = <String>[];
+  int _consoleHistoryIndex = -1;
+  String _consoleHistoryTemp = ''; // Temporary storage when navigating history
   // Cache for current mode to avoid repeated parsing during description lookups
   String? _cachedCurrentMode;
   bool _isRebuilding = false;
@@ -164,6 +168,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _setupAutocompleteListener();
     _setupConsoleAutocompleteListener();
     _startBackgroundScanning();
+    _loadConsoleHistory();
   }
 
   @override
@@ -3031,6 +3036,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   void dispose() {
     _backgroundScanTimer?.cancel();
     _stopSerialConsole();
+    _saveConsoleHistory();
     _consoleScrollController.dispose();
     _logsScrollController.dispose();
     _suggestionScrollController.dispose();
@@ -3206,6 +3212,17 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   /// Handle keyboard events for console input suggestions
   KeyEventResult _handleConsoleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is KeyDownEvent) {
+      // Handle command history navigation (only when suggestion overlay is not visible)
+      if (_consoleSuggestionOverlay == null) {
+        if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+          _navigateConsoleHistoryUp();
+          return KeyEventResult.handled;
+        } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+          _navigateConsoleHistoryDown();
+          return KeyEventResult.handled;
+        }
+      }
+      
       if (event.logicalKey == LogicalKeyboardKey.enter && 
           _consoleSuggestionOverlay != null && 
           _consoleSuggestions.isNotEmpty && 
@@ -3359,7 +3376,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       // Add "Sent: <command>" to console buffer
       _consoleBuffer.writeln('Sent: "$fullCommand"');
       
+      // Add command to history (without device prefix)
+      _addToConsoleHistory(text);
+      
       _consoleInputController.clear();
+      _consoleHistoryIndex = -1;
+      _consoleHistoryTemp = '';
       _log('Console: sent "$fullCommand" to ${_consolePort!.name}');
       
       // Update UI to show the new console output
@@ -5354,6 +5376,136 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
     
     return reportTopics;
+  }
+
+  /// Navigate console history up (previous command)
+  void _navigateConsoleHistoryUp() {
+    if (_consoleHistory.isEmpty) return;
+    
+    // Save current text if we're at the beginning of history navigation
+    if (_consoleHistoryIndex == -1) {
+      _consoleHistoryTemp = _consoleInputController.text;
+    }
+    
+    // Move to previous command
+    if (_consoleHistoryIndex < _consoleHistory.length - 1) {
+      _consoleHistoryIndex++;
+      final String command = _consoleHistory[_consoleHistory.length - 1 - _consoleHistoryIndex];
+      _consoleInputController.text = command;
+      _consoleInputController.selection = TextSelection.collapsed(offset: command.length);
+    }
+  }
+
+  /// Navigate console history down (next command)
+  void _navigateConsoleHistoryDown() {
+    if (_consoleHistory.isEmpty) return;
+    
+    if (_consoleHistoryIndex > 0) {
+      _consoleHistoryIndex--;
+      final String command = _consoleHistory[_consoleHistory.length - 1 - _consoleHistoryIndex];
+      _consoleInputController.text = command;
+      _consoleInputController.selection = TextSelection.collapsed(offset: command.length);
+    } else if (_consoleHistoryIndex == 0) {
+      // Return to temporary text
+      _consoleHistoryIndex = -1;
+      _consoleInputController.text = _consoleHistoryTemp;
+      _consoleInputController.selection = TextSelection.collapsed(offset: _consoleHistoryTemp.length);
+    }
+  }
+
+  /// Add command to console history
+  void _addToConsoleHistory(String command) {
+    if (command.trim().isEmpty) return;
+    
+    // Remove duplicate if it's the same as the last command
+    if (_consoleHistory.isNotEmpty && _consoleHistory.last == command) {
+      return;
+    }
+    
+    _consoleHistory.add(command);
+    
+    // Limit history to 100 commands
+    if (_consoleHistory.length > 100) {
+      _consoleHistory.removeAt(0);
+    }
+    
+    // Save history to file
+    _saveConsoleHistory();
+  }
+
+  /// Get console history file path for current platform
+  Future<String> _getConsoleHistoryPath() async {
+    String historyDir;
+    if (Platform.isWindows) {
+      // Windows: %APPDATA%/moduleBoxApp
+      final String appData = Platform.environment['APPDATA'] ?? '';
+      if (appData.isEmpty) {
+        // Fallback to user home
+        historyDir = Platform.environment['USERPROFILE'] ?? '';
+      } else {
+        historyDir = appData;
+      }
+      historyDir = '$historyDir${Platform.pathSeparator}moduleBoxApp';
+    } else {
+      // Linux/macOS: ~/.local/share/moduleBoxApp
+      final String home = Platform.environment['HOME'] ?? '';
+      historyDir = '$home/.local/share/moduleBoxApp';
+    }
+    
+    // Create directory if it doesn't exist
+    final Directory dir = Directory(historyDir);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    
+    return '$historyDir${Platform.pathSeparator}console_history.txt';
+  }
+
+  /// Load console history from file
+  Future<void> _loadConsoleHistory() async {
+    try {
+      final String historyPath = await _getConsoleHistoryPath();
+      final File historyFile = File(historyPath);
+      
+      if (await historyFile.exists()) {
+        final String content = await historyFile.readAsString();
+        final List<String> lines = content.split('\n');
+        
+        _consoleHistory.clear();
+        for (final String line in lines) {
+          final String trimmed = line.trim();
+          if (trimmed.isNotEmpty) {
+            _consoleHistory.add(trimmed);
+          }
+        }
+        
+        // Limit to last 100 commands
+        if (_consoleHistory.length > 100) {
+          final List<String> limited = _consoleHistory.sublist(_consoleHistory.length - 100);
+          _consoleHistory.clear();
+          _consoleHistory.addAll(limited);
+        }
+      }
+    } catch (e) {
+      // Silent error handling - history is optional
+    }
+  }
+
+  /// Save console history to file
+  Future<void> _saveConsoleHistory() async {
+    try {
+      final String historyPath = await _getConsoleHistoryPath();
+      final File historyFile = File(historyPath);
+      
+      // Write last 100 commands
+      final List<String> toSave = _consoleHistory.length > 100
+          ? _consoleHistory.sublist(_consoleHistory.length - 100)
+          : _consoleHistory;
+      
+      await historyFile.writeAsString(toSave.join('\n'));
+    } catch (e) {
+      // Silent error handling - history saving is optional
+    }
   }
 
   /// Get commands from manifest.json for a specific target slot
