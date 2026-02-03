@@ -2158,17 +2158,26 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             replacementEnd = end;
           }
         } else {
-          // No existing options or comma
-          if (currentOptionsValue.trim().isEmpty) {
+          // No existing options or comma - this is the first option
+          // Check if there's any text after "=" that the user is typing
+          final String textAfterEquals = text.substring(valueStart, end).trim();
+          
+          if (textAfterEquals.isEmpty) {
             // Empty value, just add the option
             replacementText = suggestion;
             replacementStart = valueStart;
             replacementEnd = end;
           } else {
-            // There's an existing value but no comma - append the new option with comma
-            // We need to replace the entire value with "existingValue, newValue"
-            replacementText = '$currentOptionsValue, $suggestion';
-            replacementStart = valueStart;
+            // User is typing something - replace only what they typed with the suggestion
+            // Find where the actual typed text starts (skip spaces)
+            int typedTextStart = valueStart;
+            while (typedTextStart < end && typedTextStart < text.length && text[typedTextStart] == ' ') {
+              typedTextStart++;
+            }
+            
+            // Replace only the typed text, not the entire range
+            replacementText = suggestion;
+            replacementStart = typedTextStart;
             replacementEnd = end;
           }
         }
