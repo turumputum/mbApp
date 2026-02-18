@@ -4260,40 +4260,43 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     
     // If serial device and has save callback, support long-press
     if (isSerialDevice && onPressed != null) {
-      return GestureDetector(
-        onLongPressStart: (_) {
-          setState(() {
-            _isSaveButtonLongPressed = true;
-          });
-        },
-        onLongPressEnd: (_) async {
-          setState(() {
-            _isSaveButtonLongPressed = false;
-          });
-          
-          // Determine which save method to use based on current tab
-          bool saveSuccess = false;
-          if (_currentDetailsTabIndex == 0) {
-            // Config edit tab
-            saveSuccess = await _saveConfigFromEditorWithResult();
-          } else if (_currentDetailsTabIndex == 1) {
-            // Config design tab
-            saveSuccess = await _saveConfigToFileWithResult();
-          }
+      return Tooltip(
+        message: 'Press and hold button to Save config and Restart device',
+        child: GestureDetector(
+          onLongPressStart: (_) {
+            setState(() {
+              _isSaveButtonLongPressed = true;
+            });
+          },
+          onLongPressEnd: (_) async {
+            setState(() {
+              _isSaveButtonLongPressed = false;
+            });
+            
+            // Determine which save method to use based on current tab
+            bool saveSuccess = false;
+            if (_currentDetailsTabIndex == 0) {
+              // Config edit tab
+              saveSuccess = await _saveConfigFromEditorWithResult();
+            } else if (_currentDetailsTabIndex == 1) {
+              // Config design tab
+              saveSuccess = await _saveConfigToFileWithResult();
+            }
 
-          // If save was successful, send restart command
-          if (saveSuccess) {
+            // If save was successful, send restart command
+            if (saveSuccess) {
 
-            // Add a small delay to ensure file write is complete
-            await Future.delayed(const Duration(milliseconds: 100));
-            _sendRestartCommand();
-          }
-        },
-        child: FilledButton.icon(
-          // Disable regular press when long-pressing to prevent double-save
-          onPressed: _isSaveButtonLongPressed ? null : onPressed,
-          icon: const Icon(Icons.save),
-          label: Text(_isSaveButtonLongPressed ? 'Save/Restart' : 'Save'),
+              // Add a small delay to ensure file write is complete
+              await Future.delayed(const Duration(milliseconds: 100));
+              _sendRestartCommand();
+            }
+          },
+          child: FilledButton.icon(
+            // Disable regular press when long-pressing to prevent double-save
+            onPressed: _isSaveButtonLongPressed ? null : onPressed,
+            icon: const Icon(Icons.save),
+            label: Text(_isSaveButtonLongPressed ? 'Save/Restart' : 'Save'),
+          ),
         ),
       );
     }
