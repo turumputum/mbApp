@@ -3635,8 +3635,228 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
   }
 
+  /// Get volume label from device name (max 11 characters)
+  String _getVolumeLabelFromDeviceName(String deviceName) {
+    // Remove "(unnamed)" if present
+    String label = deviceName.replaceAll('(unnamed)', '').trim();
+    if (label.isEmpty) return '';
+    
+    // Limit to 11 characters (FAT32 volume label limit)
+    if (label.length > 11) {
+      label = label.substring(0, 11);
+    }
+    
+    return label;
+  }
+
+  /// Find manifest file by volume label (new priority method)
+  Future<String?> _findManifestFileByVolumeLabel(String deviceName) async {
+    final String volumeLabel = _getVolumeLabelFromDeviceName(deviceName);
+    if (volumeLabel.isEmpty) return null;
+    
+    try {
+      if (Platform.isLinux) {
+        // Linux: /media/<username>/<volumeLabel>
+        final String? username = Platform.environment['USER'] ?? Platform.environment['USERNAME'];
+        if (username != null && username.isNotEmpty) {
+          // Try exact case match first
+          final String pathExact = '/media/$username/$volumeLabel';
+          final Directory dirExact = Directory(pathExact);
+          if (await dirExact.exists()) {
+            final String? found = await _findManifestFileInDir(dirExact, maxDepth: 5);
+            if (found != null) return found;
+          }
+          
+          // Try case-insensitive search in /media/<username>/
+          final Directory mediaDir = Directory('/media/$username');
+          if (await mediaDir.exists()) {
+            await for (final FileSystemEntity entity in mediaDir.list()) {
+              if (entity is Directory) {
+                final String dirName = entity.path.split(Platform.pathSeparator).last;
+                if (dirName.toLowerCase() == volumeLabel.toLowerCase()) {
+                  final String? found = await _findManifestFileInDir(entity, maxDepth: 5);
+                  if (found != null) return found;
+                }
+              }
+            }
+          }
+        }
+      } else if (Platform.isWindows) {
+        // Windows: Check volume labels of all drives
+        try {
+          final ProcessResult result = await Process.run(
+            'wmic',
+            ['logicaldisk', 'get', 'name,volumename', '/format:list'],
+            runInShell: true,
+          );
+          
+          if (result.exitCode == 0 && result.stdout != null) {
+            final String output = result.stdout.toString();
+            final List<String> lines = output.split('\n');
+            
+            String? currentDrive = null;
+            String? currentVolume = null;
+            
+            for (final String line in lines) {
+              final String trimmed = line.trim();
+              if (trimmed.isEmpty) {
+                // Empty line indicates end of current drive entry
+                if (currentDrive != null && currentVolume != null) {
+                  if (currentVolume.toLowerCase() == volumeLabel.toLowerCase()) {
+                    final String drivePath = '$currentDrive:\\';
+                    final Directory dir = Directory(drivePath);
+                    if (await dir.exists()) {
+                      final String? found = await _findManifestFileInDir(dir, maxDepth: 5);
+                      if (found != null) return found;
+                    }
+                  }
+                }
+                currentDrive = null;
+                currentVolume = null;
+                continue;
+              }
+              
+              if (trimmed.startsWith('Name=')) {
+                final String drive = trimmed.substring(5).trim().replaceAll(':', '');
+                if (drive.isNotEmpty && drive.length == 1) {
+                  currentDrive = drive;
+                }
+              } else if (trimmed.startsWith('VolumeName=')) {
+                currentVolume = trimmed.substring(11).trim();
+              }
+            }
+            
+            // Check last entry if file didn't end with empty line
+            if (currentDrive != null && currentVolume != null) {
+              if (currentVolume.toLowerCase() == volumeLabel.toLowerCase()) {
+                final String drivePath = '$currentDrive:\\';
+                final Directory dir = Directory(drivePath);
+                if (await dir.exists()) {
+                  final String? found = await _findManifestFileInDir(dir, maxDepth: 5);
+                  if (found != null) return found;
+                }
+              }
+            }
+          }
+        } catch (e) {
+          _log('Error checking Windows volume labels: $e');
+        }
+      }
+    } catch (e) {
+      _log('Error in _findManifestFileByVolumeLabel: $e');
+    }
+    
+    return null;
+  }
+
+  /// Find file by volume label (new priority method)
+  Future<String?> _findFileByVolumeLabel(String deviceName, String fileName) async {
+    final String volumeLabel = _getVolumeLabelFromDeviceName(deviceName);
+    if (volumeLabel.isEmpty) return null;
+    
+    try {
+      if (Platform.isLinux) {
+        // Linux: /media/<username>/<volumeLabel>
+        final String? username = Platform.environment['USER'] ?? Platform.environment['USERNAME'];
+        if (username != null && username.isNotEmpty) {
+          // Try exact case match first
+          final String pathExact = '/media/$username/$volumeLabel';
+          final File fileExact = File('$pathExact/$fileName');
+          if (await fileExact.exists()) {
+            return fileExact.path;
+          }
+          
+          // Try case-insensitive search in /media/<username>/
+          final Directory mediaDir = Directory('/media/$username');
+          if (await mediaDir.exists()) {
+            await for (final FileSystemEntity entity in mediaDir.list()) {
+              if (entity is Directory) {
+                final String dirName = entity.path.split(Platform.pathSeparator).last;
+                if (dirName.toLowerCase() == volumeLabel.toLowerCase()) {
+                  final File file = File('${entity.path}/$fileName');
+                  if (await file.exists()) {
+                    return file.path;
+                  }
+                }
+              }
+            }
+          }
+        }
+      } else if (Platform.isWindows) {
+        // Windows: Check volume labels of all drives
+        try {
+          final ProcessResult result = await Process.run(
+            'wmic',
+            ['logicaldisk', 'get', 'name,volumename', '/format:list'],
+            runInShell: true,
+          );
+          
+          if (result.exitCode == 0 && result.stdout != null) {
+            final String output = result.stdout.toString();
+            final List<String> lines = output.split('\n');
+            
+            String? currentDrive = null;
+            String? currentVolume = null;
+            
+            for (final String line in lines) {
+              final String trimmed = line.trim();
+              if (trimmed.isEmpty) {
+                // Empty line indicates end of current drive entry
+                if (currentDrive != null && currentVolume != null) {
+                  if (currentVolume.toLowerCase() == volumeLabel.toLowerCase()) {
+                    final File file = File('$currentDrive:\\$fileName');
+                    if (await file.exists()) {
+                      return file.path;
+                    }
+                  }
+                }
+                currentDrive = null;
+                currentVolume = null;
+                continue;
+              }
+              
+              if (trimmed.startsWith('Name=')) {
+                final String drive = trimmed.substring(5).trim().replaceAll(':', '');
+                if (drive.isNotEmpty && drive.length == 1) {
+                  currentDrive = drive;
+                }
+              } else if (trimmed.startsWith('VolumeName=')) {
+                currentVolume = trimmed.substring(11).trim();
+              }
+            }
+            
+            // Check last entry if file didn't end with empty line
+            if (currentDrive != null && currentVolume != null) {
+              if (currentVolume.toLowerCase() == volumeLabel.toLowerCase()) {
+                final File file = File('$currentDrive:\\$fileName');
+                if (await file.exists()) {
+                  return file.path;
+                }
+              }
+            }
+          }
+        } catch (e) {
+          _log('Error checking Windows volume labels: $e');
+        }
+      }
+    } catch (e) {
+      _log('Error in _findFileByVolumeLabel: $e');
+    }
+    
+    return null;
+  }
+
   Future<String?> _findManifestFileInRemovableDrives() async {
-    // Search known removable roots recursively (depth-limited)
+    // First, try new method by volume label (if device is selected and is serial)
+    if (_selected != null && _selected!.kind == 'serial') {
+      final String? found = await _findManifestFileByVolumeLabel(_selected!.displayName);
+      if (found != null) {
+        _log('Found manifest file by volume label: $found');
+        return found;
+      }
+    }
+    
+    // Fallback to old method: Search known removable roots recursively (depth-limited)
     for (final String root in _removableRoots) {
       final Directory dir = Directory(root);
       if (!await dir.exists()) continue;
@@ -3651,7 +3871,16 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
   Future<String?> _findFileInRemovableDrives(String fileName) async {
-    // Search known removable roots recursively (depth-limited)
+    // First, try new method by volume label (if device is selected and is serial)
+    if (_selected != null && _selected!.kind == 'serial') {
+      final String? found = await _findFileByVolumeLabel(_selected!.displayName, fileName);
+      if (found != null) {
+        _log('Found file by volume label: $found');
+        return found;
+      }
+    }
+    
+    // Fallback to old method: Search known removable roots recursively (depth-limited)
     for (final String root in _removableRoots) {
       final Directory dir = Directory(root);
       if (!await dir.exists()) continue;
