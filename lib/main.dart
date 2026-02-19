@@ -3654,6 +3654,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final String volumeLabel = _getVolumeLabelFromDeviceName(deviceName);
     if (volumeLabel.isEmpty) return null;
     
+    _log('Searching manifest file by volume label: "$volumeLabel"');
+    
     try {
       if (Platform.isLinux) {
         // Linux: /media/<username>/<volumeLabel>
@@ -3684,6 +3686,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       } else if (Platform.isWindows) {
         // Windows: Check volume labels of all drives
         try {
+          _log('Windows: Checking volume labels of all drives...');
           final ProcessResult result = await Process.run(
             'wmic',
             ['logicaldisk', 'get', 'name,volumename', '/format:list'],
@@ -3702,12 +3705,20 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               if (trimmed.isEmpty) {
                 // Empty line indicates end of current drive entry
                 if (currentDrive != null && currentVolume != null) {
+                  _log('Windows: Found drive $currentDrive: with volume label "$currentVolume"');
                   if (currentVolume.toLowerCase() == volumeLabel.toLowerCase()) {
+                    _log('Windows: Volume label match found on drive $currentDrive:');
                     final String drivePath = '$currentDrive:\\';
                     final Directory dir = Directory(drivePath);
                     if (await dir.exists()) {
+                      _log('Windows: Searching manifest file in $drivePath');
                       final String? found = await _findManifestFileInDir(dir, maxDepth: 5);
-                      if (found != null) return found;
+                      if (found != null) {
+                        _log('Windows: Found manifest file by volume label: $found');
+                        return found;
+                      } else {
+                        _log('Windows: Manifest file not found in $drivePath');
+                      }
                     }
                   }
                 }
@@ -3728,15 +3739,26 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             
             // Check last entry if file didn't end with empty line
             if (currentDrive != null && currentVolume != null) {
+              _log('Windows: Found drive $currentDrive: with volume label "$currentVolume"');
               if (currentVolume.toLowerCase() == volumeLabel.toLowerCase()) {
+                _log('Windows: Volume label match found on drive $currentDrive:');
                 final String drivePath = '$currentDrive:\\';
                 final Directory dir = Directory(drivePath);
                 if (await dir.exists()) {
+                  _log('Windows: Searching manifest file in $drivePath');
                   final String? found = await _findManifestFileInDir(dir, maxDepth: 5);
-                  if (found != null) return found;
+                  if (found != null) {
+                    _log('Windows: Found manifest file by volume label: $found');
+                    return found;
+                  } else {
+                    _log('Windows: Manifest file not found in $drivePath');
+                  }
                 }
               }
             }
+            _log('Windows: No matching volume label found for "$volumeLabel"');
+          } else {
+            _log('Windows: Failed to get volume labels (exit code: ${result.exitCode})');
           }
         } catch (e) {
           _log('Error checking Windows volume labels: $e');
@@ -3753,6 +3775,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   Future<String?> _findFileByVolumeLabel(String deviceName, String fileName) async {
     final String volumeLabel = _getVolumeLabelFromDeviceName(deviceName);
     if (volumeLabel.isEmpty) return null;
+    
+    _log('Searching file "$fileName" by volume label: "$volumeLabel"');
     
     try {
       if (Platform.isLinux) {
@@ -3785,6 +3809,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       } else if (Platform.isWindows) {
         // Windows: Check volume labels of all drives
         try {
+          _log('Windows: Checking volume labels of all drives...');
           final ProcessResult result = await Process.run(
             'wmic',
             ['logicaldisk', 'get', 'name,volumename', '/format:list'],
@@ -3803,10 +3828,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               if (trimmed.isEmpty) {
                 // Empty line indicates end of current drive entry
                 if (currentDrive != null && currentVolume != null) {
+                  _log('Windows: Found drive $currentDrive: with volume label "$currentVolume"');
                   if (currentVolume.toLowerCase() == volumeLabel.toLowerCase()) {
+                    _log('Windows: Volume label match found on drive $currentDrive:');
                     final File file = File('$currentDrive:\\$fileName');
                     if (await file.exists()) {
+                      _log('Windows: Found file "$fileName" by volume label: ${file.path}');
                       return file.path;
+                    } else {
+                      _log('Windows: File "$fileName" not found in $currentDrive:\\');
                     }
                   }
                 }
@@ -3827,13 +3857,21 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             
             // Check last entry if file didn't end with empty line
             if (currentDrive != null && currentVolume != null) {
+              _log('Windows: Found drive $currentDrive: with volume label "$currentVolume"');
               if (currentVolume.toLowerCase() == volumeLabel.toLowerCase()) {
+                _log('Windows: Volume label match found on drive $currentDrive:');
                 final File file = File('$currentDrive:\\$fileName');
                 if (await file.exists()) {
+                  _log('Windows: Found file "$fileName" by volume label: ${file.path}');
                   return file.path;
+                } else {
+                  _log('Windows: File "$fileName" not found in $currentDrive:\\');
                 }
               }
             }
+            _log('Windows: No matching volume label found for "$volumeLabel"');
+          } else {
+            _log('Windows: Failed to get volume labels (exit code: ${result.exitCode})');
           }
         } catch (e) {
           _log('Error checking Windows volume labels: $e');
