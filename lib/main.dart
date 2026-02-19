@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ffi' as ffi;
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:ffi/ffi.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter_libserialport/flutter_libserialport.dart';
@@ -3776,59 +3778,131 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     return label;
   }
 
-  /// Find Windows drive by volume label (optimized, starts from C:)
+  /// Find Windows drive by volume label using Win32 API (no external processes)
   /// Returns drive path like "C:\" or null if not found
   Future<String?> _findWindowsDriveByVolumeLabel(String volumeLabel) async {
     if (!Platform.isWindows || volumeLabel.isEmpty) return null;
     
-    _log('Windows: Searching for drive with volume label "$volumeLabel" (starting from C:)');
+    _log('Windows: Searching for drive with volume label "$volumeLabel"');
     
     try {
-      // Optimized: Check drives one by one starting from C: to avoid loading all at once
-      // Drive letters: C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z
-      final List<String> driveLetters = [];
-      // Start from C: (skip A: and B: as they're usually floppy drives)
-      for (int i = 2; i < 26; i++) {
-        driveLetters.add(String.fromCharCode(65 + i)); // C-Z
-      }
+      // Load kernel32.dll for Win32 API calls
+      final ffi.DynamicLibrary kernel32 = ffi.DynamicLibrary.open('kernel32.dll');
       
-      for (final String driveLetter in driveLetters) {
+      // Define GetVolumeInformationW function signature
+      final getVolumeInformationNative = ffi.Pointer<ffi.NativeFunction<
+          ffi.Int32 Function(
+            ffi.Pointer<ffi.Uint16>,
+            ffi.Pointer<ffi.Uint16>,
+            ffi.Uint32,
+            ffi.Pointer<ffi.Uint32>,
+            ffi.Pointer<ffi.Uint32>,
+            ffi.Pointer<ffi.Uint32>,
+            ffi.Pointer<ffi.Uint16>,
+            ffi.Uint32,
+          )>>.fromAddress(kernel32.lookup('GetVolumeInformationW').address);
+      
+      final getVolumeInformation = getVolumeInformationNative.asFunction<
+          int Function(
+            ffi.Pointer<ffi.Uint16>,
+            ffi.Pointer<ffi.Uint16>,
+            int,
+            ffi.Pointer<ffi.Uint32>,
+            ffi.Pointer<ffi.Uint32>,
+            ffi.Pointer<ffi.Uint32>,
+            ffi.Pointer<ffi.Uint16>,
+            int,
+          )>();
+      
+      // Define GetDriveTypeW function signature
+      final getDriveTypeNative = ffi.Pointer<ffi.NativeFunction<
+          ffi.Uint32 Function(ffi.Pointer<ffi.Uint16>)>>.fromAddress(
+        kernel32.lookup('GetDriveTypeW').address,
+      );
+      
+      final getDriveType = getDriveTypeNative.asFunction<
+          int Function(ffi.Pointer<ffi.Uint16>)>();
+      
+      // Check drives C: through Z:
+      for (int i = 2; i < 26; i++) {
+        final String driveLetter = String.fromCharCode(65 + i); // C-Z
+        final String drivePath = '$driveLetter:\\';
+        
+        // Convert drive path to UTF-16 (Windows uses UTF-16 for strings)
+        // For simple ASCII paths like "C:\", codeUnits works fine
+        final List<int> drivePathUtf16 = drivePath.codeUnits;
+        final int pathLength = drivePathUtf16.length;
+        final ffi.Pointer<ffi.Uint16> drivePathPtr = malloc.allocate<ffi.Uint16>(pathLength + 1);
+        for (int j = 0; j < pathLength; j++) {
+          drivePathPtr[j] = drivePathUtf16[j];
+        }
+        drivePathPtr[pathLength] = 0; // Null terminator
+        
         try {
-          // Check single drive volume label
-          final ProcessResult result = await Process.run(
-            'wmic',
-            ['logicaldisk', 'where', 'name="$driveLetter:"', 'get', 'volumename', '/format:list'],
-            runInShell: true,
-          );
+          // Check drive type (2 = removable, 3 = fixed, skip others for performance)
+          final int driveType = getDriveType(drivePathPtr);
+          if (driveType != 2 && driveType != 3) {
+            // Skip network drives (4), CD-ROM (5), RAM disk (6)
+            malloc.free(drivePathPtr);
+            continue;
+          }
           
-          if (result.exitCode == 0 && result.stdout != null) {
-            final String output = result.stdout.toString();
-            String? currentVolume = null;
+          // Allocate buffers for volume name (UTF-16, so 2 bytes per character)
+          final int bufferSize = 256;
+          final ffi.Pointer<ffi.Uint16> volumeNameBuffer = malloc.allocate<ffi.Uint16>(bufferSize);
+          final ffi.Pointer<ffi.Uint32> volumeSerialNumber = malloc.allocate<ffi.Uint32>(1);
+          final ffi.Pointer<ffi.Uint32> maxComponentLength = malloc.allocate<ffi.Uint32>(1);
+          final ffi.Pointer<ffi.Uint32> fileSystemFlags = malloc.allocate<ffi.Uint32>(1);
+          final ffi.Pointer<ffi.Uint16> fileSystemNameBuffer = malloc.allocate<ffi.Uint16>(bufferSize);
+          
+          try {
+            // Get volume information
+            final int result = getVolumeInformation(
+              drivePathPtr,
+              volumeNameBuffer,
+              bufferSize,
+              volumeSerialNumber,
+              maxComponentLength,
+              fileSystemFlags,
+              fileSystemNameBuffer,
+              bufferSize,
+            );
             
-            for (final String line in output.split('\n')) {
-              final String trimmed = line.trim();
-              if (trimmed.startsWith('VolumeName=')) {
-                currentVolume = trimmed.substring(11).trim();
-                break;
+            if (result != 0) {
+              // Success - read volume name from UTF-16 buffer
+              final List<int> volumeNameCodes = [];
+              for (int j = 0; j < bufferSize; j++) {
+                final int char = volumeNameBuffer[j];
+                if (char == 0) break; // Null terminator
+                volumeNameCodes.add(char);
               }
-            }
-            
-            if (currentVolume != null) {
-              _log('Windows: Drive $driveLetter: has volume label "$currentVolume"');
-              if (currentVolume.toLowerCase() == volumeLabel.toLowerCase()) {
-                final String drivePath = '$driveLetter:\\';
-                final Directory dir = Directory(drivePath);
-                if (await dir.exists()) {
-                  _log('Windows: Found matching drive $driveLetter: for volume label "$volumeLabel"');
-                  return drivePath;
+              if (volumeNameCodes.isNotEmpty) {
+                final String currentVolume = String.fromCharCodes(volumeNameCodes);
+                if (currentVolume.toLowerCase() == volumeLabel.toLowerCase()) {
+                  final Directory dir = Directory(drivePath);
+                  if (await dir.exists()) {
+                    _log('Windows: Found matching drive $driveLetter: for volume label "$volumeLabel"');
+                    malloc.free(drivePathPtr);
+                    return drivePath;
+                  }
                 }
               }
             }
+          } finally {
+            // Free allocated memory
+            malloc.free(volumeNameBuffer);
+            malloc.free(volumeSerialNumber);
+            malloc.free(maxComponentLength);
+            malloc.free(fileSystemFlags);
+            malloc.free(fileSystemNameBuffer);
           }
         } catch (e) {
           // Continue to next drive if this one fails
+          malloc.free(drivePathPtr);
           continue;
         }
+        
+        malloc.free(drivePathPtr);
       }
       
       _log('Windows: No matching volume label "$volumeLabel" found');
