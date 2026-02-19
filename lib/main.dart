@@ -879,7 +879,20 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     final int existing = _devices.indexWhere((DeviceItem d) => d.identifier == device.identifier && d.kind == device.kind);
     setState(() {
       if (existing >= 0) {
-        _devices[existing] = device;
+        // Reset Windows drive path cache when device is re-discovered
+        DeviceItem updatedDevice = device;
+        if (device.kind == 'serial' && Platform.isWindows) {
+          final Map<String, Object?> newExtra = Map<String, Object?>.from(device.extra);
+          newExtra.remove('windowsDrivePath');
+          updatedDevice = DeviceItem(
+            displayName: device.displayName,
+            kind: device.kind,
+            identifier: device.identifier,
+            extra: newExtra,
+          );
+          _log('Reset Windows drive path cache for device "${device.displayName}"');
+        }
+        _devices[existing] = updatedDevice;
       } else {
         _log('Found on ${device.identifier}');
 
@@ -3463,31 +3476,102 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _cachedConfigPath = null;
 
     try {
+      // For Windows serial devices: find drive by volume label first (one-time operation)
+      String? windowsDrivePath;
+      if (Platform.isWindows && _selected != null && _selected!.kind == 'serial') {
+        // Check if drive path is already cached in device extra
+        windowsDrivePath = _selected!.extra['windowsDrivePath'] as String?;
+        
+        if (windowsDrivePath == null) {
+          // Find drive by volume label (optimized, starts from C:)
+          final String volumeLabel = _getVolumeLabelFromDeviceName(_selected!.displayName);
+          if (volumeLabel.isNotEmpty) {
+            _log('Windows: Finding drive for volume label "$volumeLabel"...');
+            windowsDrivePath = await _findWindowsDriveByVolumeLabel(volumeLabel);
+            
+            // Cache the result in device extra
+            if (windowsDrivePath != null && _selected != null) {
+              final int deviceIndex = _devices.indexWhere((DeviceItem d) => 
+                d.identifier == _selected!.identifier && d.kind == _selected!.kind);
+              if (deviceIndex >= 0) {
+                final Map<String, Object?> newExtra = Map<String, Object?>.from(_selected!.extra);
+                newExtra['windowsDrivePath'] = windowsDrivePath;
+                final DeviceItem updatedDevice = DeviceItem(
+                  displayName: _selected!.displayName,
+                  kind: _selected!.kind,
+                  identifier: _selected!.identifier,
+                  extra: newExtra,
+                );
+                setState(() {
+                  _devices[deviceIndex] = updatedDevice;
+                  _selected = updatedDevice;
+                });
+                _log('Windows: Cached drive path $windowsDrivePath for device "${_selected!.displayName}"');
+              }
+            }
+          }
+        } else {
+          _log('Windows: Using cached drive path $windowsDrivePath');
+        }
+      }
+      
       // Search for manifest-*.json files
-      final String? manifestPath = await _findManifestFileInRemovableDrives();
+      String? manifestPath;
+      if (windowsDrivePath != null) {
+        // Use cached Windows drive path
+        final Directory dir = Directory(windowsDrivePath);
+        if (await dir.exists()) {
+          manifestPath = await _findManifestFileInDir(dir, maxDepth: 5);
+        }
+      } else {
+        // Use old method (Linux or fallback)
+        manifestPath = await _findManifestFileInRemovableDrives();
+      }
+      
       if (manifestPath != null) {
         _cachedManifestPath = manifestPath;
-      _cachedManifestContent = await File(manifestPath).readAsString();
-      _log('Loaded manifest file from: $_cachedManifestPath (${_cachedManifestContent!.length} chars)');
-      _parseManifestFile(_cachedManifestContent!);
+        _cachedManifestContent = await File(manifestPath).readAsString();
+        _log('Loaded manifest file from: $_cachedManifestPath (${_cachedManifestContent!.length} chars)');
+        _parseManifestFile(_cachedManifestContent!);
       } else {
         _log('No manifest-*.json files found on removable drives');
       }
 
-      // Search for config.ini
-      final String? configPath = await _findFileInRemovableDrives('config.ini');
+      // Search for config.ini on the same drive as manifest
+      String? configPath;
+      if (windowsDrivePath != null) {
+        // Use cached Windows drive path (same as manifest)
+        final File configFile = File('$windowsDrivePath\\config.ini');
+        if (await configFile.exists()) {
+          configPath = configFile.path;
+        }
+      } else if (manifestPath != null) {
+        // If manifest was found, search config.ini in the same directory
+        final String manifestDir = manifestPath.substring(0, manifestPath.lastIndexOf(Platform.pathSeparator));
+        final File configFile = File('$manifestDir${Platform.pathSeparator}config.ini');
+        if (await configFile.exists()) {
+          configPath = configFile.path;
+        } else {
+          // Fallback to old method if not in same directory
+          configPath = await _findFileInRemovableDrives('config.ini');
+        }
+      } else {
+        // Use old method if no manifest found
+        configPath = await _findFileInRemovableDrives('config.ini');
+      }
+      
       if (configPath != null) {
         _cachedConfigPath = configPath;
-      _cachedConfigContent = await File(configPath).readAsString();
-      // Normalize line endings: replace Windows "\r\n" with Unix "\n"
-      _cachedConfigContent = _cachedConfigContent!.replaceAll('\r\n', '\n');
-      _log('Loaded config.ini from: $configPath');
-      _parseConfigFile(_cachedConfigContent!);
-      
-      // Initialize the text editor with the loaded content
-      _synchronizeEditorWithCachedContent();
-      // Rebuild cached suggestions with new config data
-      _cachedSuggestions.clear();
+        _cachedConfigContent = await File(configPath).readAsString();
+        // Normalize line endings: replace Windows "\r\n" with Unix "\n"
+        _cachedConfigContent = _cachedConfigContent!.replaceAll('\r\n', '\n');
+        _log('Loaded config.ini from: $configPath');
+        _parseConfigFile(_cachedConfigContent!);
+        
+        // Initialize the text editor with the loaded content
+        _synchronizeEditorWithCachedContent();
+        // Rebuild cached suggestions with new config data
+        _cachedSuggestions.clear();
       } else {
         _log('config.ini not found on removable drives');
       }
@@ -3647,6 +3731,69 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
     
     return label;
+  }
+
+  /// Find Windows drive by volume label (optimized, starts from C:)
+  /// Returns drive path like "C:\" or null if not found
+  Future<String?> _findWindowsDriveByVolumeLabel(String volumeLabel) async {
+    if (!Platform.isWindows || volumeLabel.isEmpty) return null;
+    
+    _log('Windows: Searching for drive with volume label "$volumeLabel" (starting from C:)');
+    
+    try {
+      // Optimized: Check drives one by one starting from C: to avoid loading all at once
+      // Drive letters: C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z
+      final List<String> driveLetters = [];
+      // Start from C: (skip A: and B: as they're usually floppy drives)
+      for (int i = 2; i < 26; i++) {
+        driveLetters.add(String.fromCharCode(65 + i)); // C-Z
+      }
+      
+      for (final String driveLetter in driveLetters) {
+        try {
+          // Check single drive volume label
+          final ProcessResult result = await Process.run(
+            'wmic',
+            ['logicaldisk', 'where', 'name="$driveLetter:"', 'get', 'volumename', '/format:list'],
+            runInShell: true,
+          );
+          
+          if (result.exitCode == 0 && result.stdout != null) {
+            final String output = result.stdout.toString();
+            String? currentVolume = null;
+            
+            for (final String line in output.split('\n')) {
+              final String trimmed = line.trim();
+              if (trimmed.startsWith('VolumeName=')) {
+                currentVolume = trimmed.substring(11).trim();
+                break;
+              }
+            }
+            
+            if (currentVolume != null) {
+              _log('Windows: Drive $driveLetter: has volume label "$currentVolume"');
+              if (currentVolume.toLowerCase() == volumeLabel.toLowerCase()) {
+                final String drivePath = '$driveLetter:\\';
+                final Directory dir = Directory(drivePath);
+                if (await dir.exists()) {
+                  _log('Windows: Found matching drive $driveLetter: for volume label "$volumeLabel"');
+                  return drivePath;
+                }
+              }
+            }
+          }
+        } catch (e) {
+          // Continue to next drive if this one fails
+          continue;
+        }
+      }
+      
+      _log('Windows: No matching volume label "$volumeLabel" found');
+    } catch (e) {
+      _log('Error searching Windows drive by volume label: $e');
+    }
+    
+    return null;
   }
 
   /// Find manifest file by volume label (new priority method)
