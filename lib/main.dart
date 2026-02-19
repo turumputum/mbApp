@@ -947,8 +947,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
   static bool _isValidEnglish(String s) {
-    // Allow letters, digits, spaces, punctuation common in names; but ensure letters present
-    final RegExp allowed = RegExp(r'^[A-Za-z0-9 _:\-\.\(\)]+$');
+    // Allow letters, digits, spaces, punctuation common in names (including /); but ensure letters present
+    final RegExp allowed = RegExp(r'^[A-Za-z0-9 _:\-\.\(\)/]+$');
     return s.isNotEmpty && allowed.hasMatch(s);
   }
 
@@ -3765,10 +3765,23 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
   /// Get volume label from device name (max 11 characters)
+  /// Replaces FAT32-invalid characters with underscore
   String _getVolumeLabelFromDeviceName(String deviceName) {
     // Remove "(unnamed)" if present
     String label = deviceName.replaceAll('(unnamed)', '').trim();
     if (label.isEmpty) return '';
+    
+    // Replace FAT32-invalid characters with underscore
+    // FAT32 invalid characters: / \ : * ? " < > |
+    label = label.replaceAll('/', '_');
+    label = label.replaceAll('\\', '_');
+    label = label.replaceAll(':', '_');
+    label = label.replaceAll('*', '_');
+    label = label.replaceAll('?', '_');
+    label = label.replaceAll('"', '_');
+    label = label.replaceAll('<', '_');
+    label = label.replaceAll('>', '_');
+    label = label.replaceAll('|', '_');
     
     // Limit to 11 characters (FAT32 volume label limit)
     if (label.length > 11) {
