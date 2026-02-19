@@ -757,17 +757,29 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         for (final String serviceType in serviceTypes) {
           //_log('mDNS: Discovering $serviceType services...');
           
-          // Query for the specific service type
-          await for (final PtrResourceRecord ptr in client.lookup<PtrResourceRecord>(
-            ResourceRecordQuery.serverPointer(serviceType),
-          )) {
+          // Query for the specific service type with timeout
+          try {
+            await for (final PtrResourceRecord ptr in client.lookup<PtrResourceRecord>(
+              ResourceRecordQuery.serverPointer(serviceType),
+            ).timeout(
+              const Duration(seconds: 3),
+              onTimeout: (sink) {
+                sink.close();
+              },
+            )) {
             final String serviceName = ptr.domainName;
             //_log('mDNS: Found service: $serviceName');
             
-            // Get SRV record for the service to get host and port
-            await for (final SrvResourceRecord srv in client.lookup<SrvResourceRecord>(
-              ResourceRecordQuery.service(serviceName),
-            )) {
+            // Get SRV record for the service to get host and port with timeout
+            try {
+              await for (final SrvResourceRecord srv in client.lookup<SrvResourceRecord>(
+                ResourceRecordQuery.service(serviceName),
+              ).timeout(
+                const Duration(seconds: 2),
+                onTimeout: (sink) {
+                  sink.close();
+                },
+              )) {
               final String host = srv.target;
               final int port = srv.port;
               final String deviceId = '$host:$port';
@@ -776,11 +788,16 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 continue;
               }
               
-              // Get TXT record for additional information (may contain device name)
+              // Get TXT record for additional information (may contain device name) with timeout
               String? deviceName;
               try {
                 await for (final TxtResourceRecord txt in client.lookup<TxtResourceRecord>(
                   ResourceRecordQuery.text(serviceName),
+                ).timeout(
+                  const Duration(seconds: 1),
+                  onTimeout: (sink) {
+                    sink.close();
+                  },
                 )) {
                   // TxtResourceRecord.text can be String or List<String>
                   String txtData;
@@ -850,6 +867,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               //_log('mDNS: adding/updating "${deviceName.isEmpty ? '(unnamed)' : deviceName}" from $ipAddress:$port (hostname: $host)');
               _addOrUpdateDevice(d, "mdns");
             }
+            } catch (e) {
+              // Timeout or error getting SRV record, continue to next service
+              //_log('mDNS: Error or timeout getting SRV record: $e');
+            }
+          }
+          } catch (e) {
+            // Timeout or error getting PTR record, continue to next service type
+            //_log('mDNS: Error or timeout getting PTR record: $e');
           }
         }
         
@@ -2994,7 +3019,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       config.baudRate = 115200;
       port.config = config;
       _consolePort = port;
-      _consoleTimer = Timer.periodic(const Duration(milliseconds: 100), (Timer t) {
+      _consoleTimer = Timer.periodic(const Duration(milliseconds: 200), (Timer t) {
         if (_consolePort == null) return;
         try {
           final int available = _consolePort!.bytesAvailable;
@@ -3003,6 +3028,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             _consoleBuffer.write(const Utf8Decoder(allowMalformed: true).convert(data));
             setState(() {});
           }
+          // No setState if no data - avoid unnecessary rebuilds
         } catch (e) {
           _log('Console: read error: $e');
         }
