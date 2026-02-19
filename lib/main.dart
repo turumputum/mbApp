@@ -152,12 +152,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     // Print to console
     print(logMessage);
     
-    setState(() {
-      _logs.add(logMessage);
-      if (_logs.length > 1000) {
-        _logs.removeRange(0, _logs.length - 1000);
-      }
-    });
+    if (mounted) {
+      setState(() {
+        _logs.add(logMessage);
+        if (_logs.length > 1000) {
+          _logs.removeRange(0, _logs.length - 1000);
+        }
+      });
+    }
   }
 
   @override
@@ -623,7 +625,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     
     // Filter out ports that are in use by console
     final List<String> portsToScan = ports.where((String portName) {
-      if (_consolePort != null && _consolePort!.name == portName) {
+      if (_consolePort?.name == portName) {
         //_log('Serial: skipping $portName (in use by console)');
         return false;
       }
@@ -3020,13 +3022,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       port.config = config;
       _consolePort = port;
       _consoleTimer = Timer.periodic(const Duration(milliseconds: 200), (Timer t) {
-        if (_consolePort == null) return;
+        if (_consolePort == null || !mounted) return;
         try {
           final int available = _consolePort!.bytesAvailable;
           if (available > 0) {
             final Uint8List data = _consolePort!.read(available);
             _consoleBuffer.write(const Utf8Decoder(allowMalformed: true).convert(data));
-            setState(() {});
+            if (mounted) {
+              setState(() {});
+            }
           }
           // No setState if no data - avoid unnecessary rebuilds
         } catch (e) {
@@ -3059,23 +3063,31 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     // Stop console connection
     _stopSerialConsole();
     
+    // Dispose config controllers before clearing parsed config
+    for (final TextEditingController controller in _configControllers.values) {
+      controller.dispose();
+    }
+    _configControllers.clear();
+    
     // Remove device from list and clear device selection and related cached data
-    setState(() {
-      // Remove the device from the list if it exists
-      if (deviceIdentifier != null && deviceKind != null) {
-        _devices.removeWhere((DeviceItem d) => 
-          d.identifier == deviceIdentifier && d.kind == deviceKind);
-      }
-      
-      _selected = null;
-      _cachedConfigPath = null;
-      _cachedConfigContent = null;
-      _cachedManifestPath = null;
-      _cachedManifestContent = null;
-      _parsedConfig.clear();
-      _configEditorController.clear();
-      _selectedChapter = null;
-    });
+    if (mounted) {
+      setState(() {
+        // Remove the device from the list if it exists
+        if (deviceIdentifier != null && deviceKind != null) {
+          _devices.removeWhere((DeviceItem d) => 
+            d.identifier == deviceIdentifier && d.kind == deviceKind);
+        }
+        
+        _selected = null;
+        _cachedConfigPath = null;
+        _cachedConfigContent = null;
+        _cachedManifestPath = null;
+        _cachedManifestContent = null;
+        _parsedConfig.clear();
+        _configEditorController.clear();
+        _selectedChapter = null;
+      });
+    }
     
     _log('Invalidate: Device selection cleared');
   }
@@ -3088,7 +3100,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _consoleScrollController.dispose();
     _logsScrollController.dispose();
     _suggestionScrollController.dispose();
+    _textEditorScrollController.dispose();
     _configEditorController.dispose();
+    _configEditorFocusNode.dispose();
     _autocompleteTimer?.cancel();
     _overlayTimer?.cancel();
     _consoleAutocompleteTimer?.cancel();
@@ -3100,6 +3114,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     for (final TextEditingController controller in _configControllers.values) {
       controller.dispose();
     }
+    _configControllers.clear();
     _detailsTabController.dispose();
     super.dispose();
   }
@@ -3433,7 +3448,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       _log('Console: sent "$fullCommand" to ${_consolePort!.name}');
       
       // Update UI to show the new console output
-      setState(() {});
+      if (mounted) {
+        setState(() {});
+      }
     } catch (e) {
       _log('Console: send error: $e');
     }
@@ -4846,8 +4863,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     // Remove the chapter from parsed config
     _parsedConfig.remove(chapterToDelete);
     
-    // Clear controllers for this chapter
-    for (final String key in _configControllers.keys.toList()) {
+    // Clear controllers for this chapter only
+    final List<String> keysToRemove = _configControllers.keys
+        .where((String key) => key.startsWith('$chapterToDelete.'))
+        .toList();
+    for (final String key in keysToRemove) {
       _configControllers[key]?.dispose();
       _configControllers.remove(key);
     }
