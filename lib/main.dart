@@ -763,9 +763,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         // On Windows, configure multicast socket options explicitly
         if (Platform.isWindows) {
           try {
-            // Set multicast loopback to receive our own packets (for testing)
+            // Enable broadcast for multicast
             socket.broadcastEnabled = true;
-            _log('mDNS: Socket bound successfully, broadcast enabled');
+            
+            // Join multicast group 224.0.0.251 (mDNS multicast address)
+            // This is critical for Windows to receive multicast packets
+            final InternetAddress multicastAddress = InternetAddress('224.0.0.251');
+            socket.joinMulticast(multicastAddress);
+            
+            _log('mDNS: Socket bound successfully, joined multicast group 224.0.0.251, broadcast enabled');
           } catch (e) {
             _log('mDNS: Warning - could not configure socket options: $e');
           }
@@ -809,9 +815,20 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           
           int ptrCount = 0;
           try {
-            await for (final PtrResourceRecord ptr in client.lookup<PtrResourceRecord>(
+            // Start the lookup stream - this should trigger the query
+            final Stream<PtrResourceRecord> ptrStream = client.lookup<PtrResourceRecord>(
               ResourceRecordQuery.serverPointer(serviceType),
-            ).timeout(
+            );
+            
+            _log('mDNS: Started PTR lookup stream for $serviceType');
+            
+            // On Windows, give a moment for the query to be sent
+            if (Platform.isWindows) {
+              await Future<void>.delayed(const Duration(milliseconds: 100));
+              _log('mDNS: Query should have been sent, waiting for responses...');
+            }
+            
+            await for (final PtrResourceRecord ptr in ptrStream.timeout(
               ptrTimeout,
               onTimeout: (sink) {
                 _log('mDNS: PTR lookup timeout for $serviceType after $ptrTimeout');
