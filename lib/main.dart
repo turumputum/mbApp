@@ -737,67 +737,95 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   Future<void> _scanMdnsBroadcasts() async {
     try {
-      //_log('mDNS: Starting discovery...');
+      _log('mDNS: Starting discovery on ${Platform.operatingSystem}...');
       
       //final MDnsClient client = MDnsClient();
 
       final MDnsClient client = MDnsClient(rawDatagramSocketFactory:
       (dynamic host, int port,
-        {bool? reuseAddress, bool? reusePort, int? ttl}) {
-      // On Windows, explicitly bind to anyIPv4 to listen on all interfaces
-      final InternetAddress bindAddress = Platform.isWindows 
-          ? InternetAddress.anyIPv4 
-          : (host is InternetAddress ? host : InternetAddress.anyIPv4);
-      
-      return RawDatagramSocket.bind(
-        bindAddress, 
-        port,
-        reuseAddress: true, 
-        reusePort: Platform.isWindows ? false : true, 
-        ttl: ttl ?? 255
-      );
+        {bool? reuseAddress, bool? reusePort, int? ttl}) async {
+      try {
+        // On Windows, explicitly bind to anyIPv4 to listen on all interfaces
+        final InternetAddress bindAddress = Platform.isWindows 
+            ? InternetAddress.anyIPv4 
+            : (host is InternetAddress ? host : InternetAddress.anyIPv4);
+        
+        _log('mDNS: Binding socket to $bindAddress:$port (Windows: ${Platform.isWindows})');
+        
+        final RawDatagramSocket socket = await RawDatagramSocket.bind(
+          bindAddress, 
+          port,
+          reuseAddress: true, 
+          reusePort: Platform.isWindows ? false : true, 
+          ttl: ttl ?? 255
+        );
+        
+        // On Windows, configure multicast socket options explicitly
+        if (Platform.isWindows) {
+          try {
+            // Set multicast loopback to receive our own packets (for testing)
+            socket.broadcastEnabled = true;
+            _log('mDNS: Socket bound successfully, broadcast enabled');
+          } catch (e) {
+            _log('mDNS: Warning - could not configure socket options: $e');
+          }
+        }
+        
+        return socket;
+      } catch (e) {
+        _log('mDNS: Error binding socket: $e');
+        rethrow;
+      }
       });  
 
-      await client.start();
+      try {
+        await client.start();
+        _log('mDNS: Client started successfully');
+      } catch (e) {
+        _log('mDNS: Error starting client: $e');
+        rethrow;
+      }
       
       // On Windows, give the client a moment to properly initialize the socket
       if (Platform.isWindows) {
-        await Future<void>.delayed(const Duration(milliseconds: 100));
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        _log('mDNS: Initialization delay completed');
       }
       
       final Set<String> uniqueDeviceIds = <String>{}; // Track unique device identifiers
       
       try {
-        // Discover FTP services (common service type for FTP servers)
-        // Also try _modulebox._tcp in case it's a custom service type
-//        final List<String> serviceTypes = ['_ftp._tcp', '_modulebox._tcp', '_http._tcp'];
+        // Discover only FTP servers via mDNS
         final List<String> serviceTypes = ['_ftp._tcp'];
         
         for (final String serviceType in serviceTypes) {
-          //_log('mDNS: Discovering $serviceType services...');
+          _log('mDNS: Discovering $serviceType services...');
           
           // Query for the specific service type with timeout
           // Use longer timeout on Windows as network discovery can be slower
           final Duration ptrTimeout = Platform.isWindows 
-              ? const Duration(seconds: 5) 
+              ? const Duration(seconds: 8) 
               : const Duration(seconds: 3);
           
+          int ptrCount = 0;
           try {
             await for (final PtrResourceRecord ptr in client.lookup<PtrResourceRecord>(
               ResourceRecordQuery.serverPointer(serviceType),
             ).timeout(
               ptrTimeout,
               onTimeout: (sink) {
+                _log('mDNS: PTR lookup timeout for $serviceType after $ptrTimeout');
                 sink.close();
               },
             )) {
+            ptrCount++;
             final String serviceName = ptr.domainName;
-            //_log('mDNS: Found service: $serviceName');
+            _log('mDNS: Found service: $serviceName (PTR #$ptrCount)');
             
             // Get SRV record for the service to get host and port with timeout
             // Use longer timeout on Windows
             final Duration srvTimeout = Platform.isWindows 
-                ? const Duration(seconds: 3) 
+                ? const Duration(seconds: 5) 
                 : const Duration(seconds: 2);
             
             try {
@@ -806,9 +834,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               ).timeout(
                 srvTimeout,
                 onTimeout: (sink) {
+                  _log('mDNS: SRV lookup timeout for $serviceName');
                   sink.close();
                 },
               )) {
+              _log('mDNS: Got SRV record for $serviceName -> ${srv.target}:${srv.port}');
               final String host = srv.target;
               final int port = srv.port;
               final String deviceId = '$host:$port';
@@ -820,7 +850,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               // Get TXT record for additional information (may contain device name) with timeout
               // Use longer timeout on Windows
               final Duration txtTimeout = Platform.isWindows 
-                  ? const Duration(seconds: 2) 
+                  ? const Duration(seconds: 3) 
                   : const Duration(seconds: 1);
               
               String? deviceName;
@@ -830,6 +860,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 ).timeout(
                   txtTimeout,
                   onTimeout: (sink) {
+                    _log('mDNS: TXT lookup timeout for $serviceName');
                     sink.close();
                   },
                 )) {
@@ -850,7 +881,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   }
                 }
               } catch (e) {
-                //_log('mDNS: Error reading TXT record for $serviceName: $e');
+                _log('mDNS: Error reading TXT record for $serviceName: $e');
               }
               
               // If no device name found in TXT, try to extract from service name
@@ -873,17 +904,20 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   ipAddress = addresses.first.address;
                 }
               } catch (e) {
-                //_log('mDNS: Error resolving hostname $host: $e');
+                _log('mDNS: Error resolving hostname $host: $e');
                 // Try to use host as IP if it's already an IP address
                 if (RegExp(r'^\d+\.\d+\.\d+\.\d+$').hasMatch(host)) {
                   ipAddress = host;
+                  _log('mDNS: Using host as IP address: $ipAddress');
                 }
               }
               
               if (ipAddress == null) {
-                //_log('mDNS: Could not resolve IP for $host, skipping');
+                _log('mDNS: Could not resolve IP for $host, skipping');
                 continue;
               }
+              
+              _log('mDNS: Resolved $host -> $ipAddress');
               
               uniqueDeviceIds.add(deviceId);
               final DeviceItem d = DeviceItem(
@@ -898,25 +932,30 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   'service_type': serviceType,
                 },
               );
-              //_log('mDNS: adding/updating "${deviceName.isEmpty ? '(unnamed)' : deviceName}" from $ipAddress:$port (hostname: $host)');
+              _log('mDNS: adding/updating "${deviceName.isEmpty ? '(unnamed)' : deviceName}" from $ipAddress:$port (hostname: $host)');
               _addOrUpdateDevice(d, "mdns");
             }
             } catch (e) {
               // Timeout or error getting SRV record, continue to next service
-              //_log('mDNS: Error or timeout getting SRV record: $e');
+              _log('mDNS: Error or timeout getting SRV record: $e');
             }
           }
+          _log('mDNS: Finished querying $serviceType, found $ptrCount PTR record(s)');
           } catch (e) {
             // Timeout or error getting PTR record, continue to next service type
-            //_log('mDNS: Error or timeout getting PTR record: $e');
+            _log('mDNS: Error or timeout getting PTR record for $serviceType: $e');
           }
         }
         
-        // Wait a bit for all responses
-        //await Future<void>.delayed(const Duration(seconds: 2));
+        // Wait a bit for all responses on Windows
+        if (Platform.isWindows) {
+          await Future<void>.delayed(const Duration(seconds: 1));
+          _log('mDNS: Waiting for additional responses...');
+        }
         
       } finally {
         client.stop();
+        _log('mDNS: Client stopped');
       }
       
       // // Add found devices
@@ -924,9 +963,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       //   _addOrUpdateDevice(d);
       // }
       
-      //_log('mDNS: scan finished. Found ${found.length} device(s).');
-    } catch (e) {
-      //_log('mDNS: error: $e');
+      _log('mDNS: scan finished.');
+    } catch (e, stackTrace) {
+      _log('mDNS: error: $e');
+      _log('mDNS: stack trace: $stackTrace');
     }
   }
 
