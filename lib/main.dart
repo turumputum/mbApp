@@ -761,17 +761,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         );
         
         // On Windows, configure multicast socket options explicitly
+        // Note: Do NOT call joinMulticast here - MDnsClient.start() will do it
+        // Calling it twice causes errno 10022 (Invalid argument) on Windows
         if (Platform.isWindows) {
           try {
             // Enable broadcast for multicast
             socket.broadcastEnabled = true;
             
-            // Join multicast group 224.0.0.251 (mDNS multicast address)
-            // This is critical for Windows to receive multicast packets
-            final InternetAddress multicastAddress = InternetAddress('224.0.0.251');
-            socket.joinMulticast(multicastAddress);
-            
-            _log('mDNS: Socket bound successfully, joined multicast group 224.0.0.251, broadcast enabled');
+            _log('mDNS: Socket bound successfully, broadcast enabled (joinMulticast will be called by MDnsClient.start())');
           } catch (e) {
             _log('mDNS: Warning - could not configure socket options: $e');
           }
