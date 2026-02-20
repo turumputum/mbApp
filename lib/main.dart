@@ -813,18 +813,19 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           int ptrCount = 0;
           try {
             // Start the lookup stream - this should trigger the query
+            _log('mDNS: Creating PTR lookup query for $serviceType...');
+            
             final Stream<PtrResourceRecord> ptrStream = client.lookup<PtrResourceRecord>(
               ResourceRecordQuery.serverPointer(serviceType),
             );
             
-            _log('mDNS: Started PTR lookup stream for $serviceType');
+            _log('mDNS: PTR lookup stream created');
             
-            // On Windows, give a moment for the query to be sent
-            if (Platform.isWindows) {
-              await Future<void>.delayed(const Duration(milliseconds: 100));
-              _log('mDNS: Query should have been sent, waiting for responses...');
-            }
+            // On Windows, the stream needs an active listener to send the query
+            // Use await for which automatically subscribes and should trigger query sending
+            _log('mDNS: Starting to listen for PTR records (this should trigger query sending)...');
             
+            // Process records from the stream with timeout
             await for (final PtrResourceRecord ptr in ptrStream.timeout(
               ptrTimeout,
               onTimeout: (sink) {
