@@ -735,6 +735,64 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     return null;
   }
 
+  /// Manually send mDNS query for Windows
+  /// Creates a DNS query packet for PTR record lookup
+  Future<void> _sendMdnsQuery(RawDatagramSocket socket, String serviceType) async {
+    try {
+      // Build DNS query packet
+      final List<int> packet = [];
+      
+      // DNS Header (12 bytes)
+      // ID: 0 (mDNS uses 0)
+      packet.addAll([0x00, 0x00]);
+      // Flags: Standard query (0x0000)
+      packet.addAll([0x00, 0x00]);
+      // Questions: 1
+      packet.addAll([0x00, 0x01]);
+      // Answer RRs: 0
+      packet.addAll([0x00, 0x00]);
+      // Authority RRs: 0
+      packet.addAll([0x00, 0x00]);
+      // Additional RRs: 0
+      packet.addAll([0x00, 0x00]);
+      
+      // Question section
+      // QNAME: serviceType.local (e.g., "_ftp._tcp.local")
+      final String fullName = '$serviceType.local';
+      final List<String> labels = fullName.split('.');
+      
+      for (final String label in labels) {
+        if (label.isNotEmpty) {
+          packet.add(label.length); // Length of label
+          packet.addAll(label.codeUnits); // Label bytes
+        }
+      }
+      packet.add(0); // Null terminator
+      
+      // QTYPE: PTR (12)
+      packet.addAll([0x00, 0x0C]);
+      // QCLASS: IN (1) with unicast response flag (0x8001)
+      packet.addAll([0x80, 0x01]);
+      
+      // Send to mDNS multicast address
+      final InternetAddress multicastAddress = InternetAddress('224.0.0.251');
+      const int mdnsPort = 5353;
+      
+      final int bytesSent = socket.send(
+        Uint8List.fromList(packet),
+        multicastAddress,
+        mdnsPort,
+      );
+      _log('mDNS: Manually sent query for $serviceType, $bytesSent bytes sent to ${multicastAddress.address}:$mdnsPort');
+      
+      if (bytesSent == 0) {
+        _log('mDNS: Warning - no bytes were sent, check socket configuration');
+      }
+    } catch (e) {
+      _log('mDNS: Error sending manual query: $e');
+    }
+  }
+
   Future<void> _scanMdnsBroadcasts() async {
     try {
       _log('mDNS: Starting discovery on ${Platform.operatingSystem}...');
@@ -795,6 +853,21 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         _log('mDNS: Initialization delay completed');
       }
       
+      // On Windows, create a separate socket for sending queries manually
+      RawDatagramSocket? querySocket;
+      if (Platform.isWindows) {
+        try {
+          querySocket = await RawDatagramSocket.bind(
+            InternetAddress.anyIPv4,
+            0, // Use any available port for sending
+          );
+          querySocket.broadcastEnabled = true;
+          _log('mDNS: Created separate socket for sending queries');
+        } catch (e) {
+          _log('mDNS: Warning - could not create query socket: $e');
+        }
+      }
+      
       final Set<String> uniqueDeviceIds = <String>{}; // Track unique device identifiers
       
       try {
@@ -803,6 +876,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         
         for (final String serviceType in serviceTypes) {
           _log('mDNS: Discovering $serviceType services...');
+          
+          // On Windows, manually send the query first
+          if (Platform.isWindows && querySocket != null) {
+            await _sendMdnsQuery(querySocket, serviceType);
+            // Give a moment for the query to be sent
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+          }
           
           // Query for the specific service type with timeout
           // Use longer timeout on Windows as network discovery can be slower
@@ -969,6 +1049,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         }
         
       } finally {
+        // Close query socket if it was created
+        if (Platform.isWindows && querySocket != null) {
+          querySocket.close();
+          _log('mDNS: Query socket closed');
+        }
         client.stop();
         _log('mDNS: Client stopped');
       }
