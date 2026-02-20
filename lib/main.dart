@@ -992,27 +992,36 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               }
               
               // Resolve hostname to IP address
+              // First check if host is already an IP address
               String? ipAddress;
-              try {
-                final List<InternetAddress> addresses = await InternetAddress.lookup(host);
-                if (addresses.isNotEmpty) {
-                  ipAddress = addresses.first.address;
-                }
-              } catch (e) {
-                _log('mDNS: Error resolving hostname $host: $e');
-                // Try to use host as IP if it's already an IP address
-                if (RegExp(r'^\d+\.\d+\.\d+\.\d+$').hasMatch(host)) {
-                  ipAddress = host;
-                  _log('mDNS: Using host as IP address: $ipAddress');
+              if (RegExp(r'^\d+\.\d+\.\d+\.\d+$').hasMatch(host)) {
+                ipAddress = host;
+                _log('mDNS: Host is already an IP address: $ipAddress');
+              } else {
+                // Try system DNS with short timeout (optimized for speed)
+                try {
+                  final List<InternetAddress> addresses = await InternetAddress.lookup(host).timeout(
+                    const Duration(milliseconds: 200), // Very short timeout to avoid long delays
+                    onTimeout: () {
+                      throw TimeoutException('DNS lookup timeout');
+                    },
+                  );
+                  if (addresses.isNotEmpty) {
+                    ipAddress = addresses.first.address;
+                    _log('mDNS: Resolved $host -> $ipAddress');
+                  }
+                } catch (e) {
+                  // DNS lookup failed or timed out - use hostname directly
+                  // For mDNS devices, hostname often works directly for connections
+                  _log('mDNS: DNS lookup failed/timed out for $host, using hostname directly');
+                  ipAddress = host; // Use hostname as fallback - many mDNS devices accept hostname
                 }
               }
               
-              if (ipAddress == null) {
-                _log('mDNS: Could not resolve IP for $host, skipping');
+              if (ipAddress == null || ipAddress.isEmpty) {
+                _log('mDNS: Could not determine address for $host, skipping');
                 continue;
               }
-              
-              _log('mDNS: Resolved $host -> $ipAddress');
               
               uniqueDeviceIds.add(deviceId);
               final DeviceItem d = DeviceItem(
