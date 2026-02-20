@@ -744,11 +744,26 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final MDnsClient client = MDnsClient(rawDatagramSocketFactory:
       (dynamic host, int port,
         {bool? reuseAddress, bool? reusePort, int? ttl}) {
-      return RawDatagramSocket.bind(host, port,
-          reuseAddress: true, reusePort: Platform.isWindows ? false : true, ttl: ttl!);
+      // On Windows, explicitly bind to anyIPv4 to listen on all interfaces
+      final InternetAddress bindAddress = Platform.isWindows 
+          ? InternetAddress.anyIPv4 
+          : (host is InternetAddress ? host : InternetAddress.anyIPv4);
+      
+      return RawDatagramSocket.bind(
+        bindAddress, 
+        port,
+        reuseAddress: true, 
+        reusePort: Platform.isWindows ? false : true, 
+        ttl: ttl ?? 255
+      );
       });  
 
       await client.start();
+      
+      // On Windows, give the client a moment to properly initialize the socket
+      if (Platform.isWindows) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
       
       final Set<String> uniqueDeviceIds = <String>{}; // Track unique device identifiers
       
@@ -762,11 +777,16 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           //_log('mDNS: Discovering $serviceType services...');
           
           // Query for the specific service type with timeout
+          // Use longer timeout on Windows as network discovery can be slower
+          final Duration ptrTimeout = Platform.isWindows 
+              ? const Duration(seconds: 5) 
+              : const Duration(seconds: 3);
+          
           try {
             await for (final PtrResourceRecord ptr in client.lookup<PtrResourceRecord>(
               ResourceRecordQuery.serverPointer(serviceType),
             ).timeout(
-              const Duration(seconds: 3),
+              ptrTimeout,
               onTimeout: (sink) {
                 sink.close();
               },
@@ -775,11 +795,16 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             //_log('mDNS: Found service: $serviceName');
             
             // Get SRV record for the service to get host and port with timeout
+            // Use longer timeout on Windows
+            final Duration srvTimeout = Platform.isWindows 
+                ? const Duration(seconds: 3) 
+                : const Duration(seconds: 2);
+            
             try {
               await for (final SrvResourceRecord srv in client.lookup<SrvResourceRecord>(
                 ResourceRecordQuery.service(serviceName),
               ).timeout(
-                const Duration(seconds: 2),
+                srvTimeout,
                 onTimeout: (sink) {
                   sink.close();
                 },
@@ -793,12 +818,17 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               }
               
               // Get TXT record for additional information (may contain device name) with timeout
+              // Use longer timeout on Windows
+              final Duration txtTimeout = Platform.isWindows 
+                  ? const Duration(seconds: 2) 
+                  : const Duration(seconds: 1);
+              
               String? deviceName;
               try {
                 await for (final TxtResourceRecord txt in client.lookup<TxtResourceRecord>(
                   ResourceRecordQuery.text(serviceName),
                 ).timeout(
-                  const Duration(seconds: 1),
+                  txtTimeout,
                   onTimeout: (sink) {
                     sink.close();
                   },
