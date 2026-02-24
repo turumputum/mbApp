@@ -737,7 +737,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
 
   /// Manually send mDNS query for Windows
   /// Creates a DNS query packet for PTR record lookup
-  Future<void> _sendMdnsQuery(RawDatagramSocket socket, String serviceType) async {
+  Future<void> _sendMdnsQuery(RawDatagramSocket socket, String serviceType, {InternetAddress? interfaceAddress}) async {
     try {
       // Build DNS query packet
       final List<int> packet = [];
@@ -783,13 +783,20 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         multicastAddress,
         mdnsPort,
       );
-      _log('mDNS: Manually sent query for $serviceType, $bytesSent bytes sent to ${multicastAddress.address}:$mdnsPort');
+      
+      final String interfaceInfo = interfaceAddress != null 
+          ? ' on interface ${interfaceAddress.address}' 
+          : '';
+      _log('mDNS: Manually sent query for $serviceType$interfaceInfo, $bytesSent bytes sent to ${multicastAddress.address}:$mdnsPort');
       
       if (bytesSent == 0) {
-        _log('mDNS: Warning - no bytes were sent, check socket configuration');
+        _log('mDNS: Warning - no bytes were sent$interfaceInfo, check socket configuration');
       }
     } catch (e) {
-      _log('mDNS: Error sending manual query: $e');
+      final String interfaceInfo = interfaceAddress != null 
+          ? ' on interface ${interfaceAddress.address}' 
+          : '';
+      _log('mDNS: Error sending manual query$interfaceInfo: $e');
     }
   }
 
@@ -853,18 +860,57 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         _log('mDNS: Initialization delay completed');
       }
       
-      // On Windows, create a separate socket for sending queries manually
-      RawDatagramSocket? querySocket;
+      // On Windows, create separate sockets for sending queries on each interface
+      final List<({RawDatagramSocket socket, InternetAddress address})> querySockets = [];
       if (Platform.isWindows) {
         try {
-          querySocket = await RawDatagramSocket.bind(
-            InternetAddress.anyIPv4,
-            0, // Use any available port for sending
+          // Get all network interfaces
+          final List<NetworkInterface> interfaces = await NetworkInterface.list(
+            includeLinkLocal: false,
+            type: InternetAddressType.IPv4,
           );
-          querySocket.broadcastEnabled = true;
-          _log('mDNS: Created separate socket for sending queries');
+          
+          _log('mDNS: Found ${interfaces.length} network interface(s)');
+          
+          // Create a socket for each interface
+          for (final NetworkInterface interface in interfaces) {
+            for (final InternetAddress address in interface.addresses) {
+              // Skip loopback and link-local addresses
+              if (address.isLoopback || address.isLinkLocal) {
+                continue;
+              }
+              
+              try {
+                final RawDatagramSocket socket = await RawDatagramSocket.bind(
+                  address,
+                  0, // Use any available port for sending
+                );
+                socket.broadcastEnabled = true;
+                querySockets.add((socket: socket, address: address));
+                _log('mDNS: Created query socket on interface ${interface.name} (${address.address})');
+              } catch (e) {
+                _log('mDNS: Warning - could not create query socket on ${interface.name} (${address.address}): $e');
+              }
+            }
+          }
+          
+          if (querySockets.isEmpty) {
+            _log('mDNS: Warning - no query sockets created, falling back to anyIPv4');
+            // Fallback to anyIPv4 if no interfaces worked
+            try {
+              final RawDatagramSocket fallbackSocket = await RawDatagramSocket.bind(
+                InternetAddress.anyIPv4,
+                0,
+              );
+              fallbackSocket.broadcastEnabled = true;
+              querySockets.add((socket: fallbackSocket, address: InternetAddress.anyIPv4));
+              _log('mDNS: Created fallback query socket on anyIPv4');
+            } catch (e) {
+              _log('mDNS: Error creating fallback query socket: $e');
+            }
+          }
         } catch (e) {
-          _log('mDNS: Warning - could not create query socket: $e');
+          _log('mDNS: Error getting network interfaces: $e');
         }
       }
       
@@ -877,10 +923,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         for (final String serviceType in serviceTypes) {
           _log('mDNS: Discovering $serviceType services...');
           
-          // On Windows, manually send the query first
-          if (Platform.isWindows && querySocket != null) {
-            await _sendMdnsQuery(querySocket, serviceType);
-            // Give a moment for the query to be sent
+          // On Windows, manually send the query on each interface
+          if (Platform.isWindows && querySockets.isNotEmpty) {
+            // Send query through each socket (interface) in parallel
+            await Future.wait(
+              querySockets.map((entry) async {
+                await _sendMdnsQuery(entry.socket, serviceType, interfaceAddress: entry.address);
+              }),
+            );
+            // Give a moment for the queries to be sent
             await Future<void>.delayed(const Duration(milliseconds: 100));
           }
           
@@ -1058,10 +1109,16 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         }
         
       } finally {
-        // Close query socket if it was created
-        if (Platform.isWindows && querySocket != null) {
-          querySocket.close();
-          _log('mDNS: Query socket closed');
+        // Close all query sockets if they were created
+        if (Platform.isWindows && querySockets.isNotEmpty) {
+          for (final entry in querySockets) {
+            try {
+              entry.socket.close();
+            } catch (e) {
+              _log('mDNS: Error closing query socket: $e');
+            }
+          }
+          _log('mDNS: Closed ${querySockets.length} query socket(s)');
         }
         client.stop();
         _log('mDNS: Client stopped');
