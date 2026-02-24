@@ -811,8 +811,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       (dynamic host, int port,
         {bool? reuseAddress, bool? reusePort, int? ttl}) async {
       try {
-        _log('mDNS: Binding socket to $interfaceAddress:$port on interface $interfaceName');
-        
         final RawDatagramSocket socket = await RawDatagramSocket.bind(
           interfaceAddress, 
           port,
@@ -823,23 +821,21 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         
         try {
           socket.broadcastEnabled = true;
-          _log('mDNS: Socket bound successfully on $interfaceName ($interfaceAddress)');
         } catch (e) {
-          _log('mDNS: Warning - could not configure socket options on $interfaceName: $e');
+          // Ignore broadcast setting errors
         }
         
         return socket;
       } catch (e) {
-        _log('mDNS: Error binding socket on $interfaceName: $e');
+        _log('mDNS: Failed to bind on $interfaceName (${interfaceAddress.address}): ${e.toString().split('\n').first}');
         rethrow;
       }
       });  
 
       try {
         await client.start();
-        _log('mDNS: Client started on interface $interfaceName');
       } catch (e) {
-        _log('mDNS: Error starting client on $interfaceName: $e');
+        _log('mDNS: Failed to start on $interfaceName: ${e.toString().split('\n').first}');
         return;
       }
       
@@ -858,7 +854,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         await _sendMdnsQuery(querySocket, serviceType, interfaceAddress: interfaceAddress);
         await Future<void>.delayed(const Duration(milliseconds: 50));
       } catch (e) {
-        _log('mDNS: Warning - could not create/send query socket on $interfaceName: $e');
+        _log('mDNS: Failed to send query on $interfaceName: ${e.toString().split('\n').first}');
       }
       
       // Query for the specific service type with timeout
@@ -980,23 +976,23 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           }
         }
       } catch (e) {
-        _log('mDNS: Error on interface $interfaceName: $e');
+        _log('mDNS: Error on $interfaceName: ${e.toString().split('\n').first}');
       } finally {
         if (querySocket != null) {
           try {
             querySocket.close();
           } catch (e) {
-            // Ignore
+            // Ignore close errors
           }
         }
         try {
           client.stop();
         } catch (e) {
-          // Ignore
+          // Ignore stop errors
         }
       }
     } catch (e) {
-      _log('mDNS: Error scanning interface $interfaceName: $e');
+      _log('mDNS: Failed to scan $interfaceName: ${e.toString().split('\n').first}');
     }
   }
 
@@ -1038,15 +1034,21 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           for (final String serviceType in serviceTypes) {
             _log('mDNS: Discovering $serviceType services...');
             
+            // Use eagerError: false to continue even if one interface fails
             await Future.wait(
-              interfaceList.map((entry) => 
-                _scanMdnsOnInterface(entry.address, entry.name, serviceType, uniqueDeviceIds)
-              ),
+              interfaceList.map((entry) async {
+                try {
+                  await _scanMdnsOnInterface(entry.address, entry.name, serviceType, uniqueDeviceIds);
+                } catch (e) {
+                  // Error already logged in _scanMdnsOnInterface, just continue
+                  _log('mDNS: Skipping ${entry.name} due to error');
+                }
+              }),
               eagerError: false, // Continue even if one interface fails
             );
           }
         } catch (e) {
-          _log('mDNS: Error getting network interfaces: $e');
+          _log('mDNS: Failed to get interfaces: ${e.toString().split('\n').first}');
         }
       } else {
         // On non-Windows, use standard approach
