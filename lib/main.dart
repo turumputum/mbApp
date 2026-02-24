@@ -787,7 +787,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final String interfaceInfo = interfaceAddress != null 
           ? ' on interface ${interfaceAddress.address}' 
           : '';
-      _log('mDNS: Manually sent query for $serviceType$interfaceInfo, $bytesSent bytes sent to ${multicastAddress.address}:$mdnsPort');
+      _log('mDNS: Sent query for $serviceType$interfaceInfo, $bytesSent bytes sent to ${multicastAddress.address}:$mdnsPort');
       
       if (bytesSent == 0) {
         _log('mDNS: Warning - no bytes were sent$interfaceInfo, check socket configuration');
@@ -835,7 +835,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       try {
         await client.start();
       } catch (e) {
-        _log('mDNS: Failed to start on $interfaceName: ${e.toString().split('\n').first}');
+        // Check if it's a protocol option error (common on VPN/virtual interfaces)
+        final String errorStr = e.toString();
+        if (errorStr.contains('10042') || errorStr.contains('getsockopt') || errorStr.contains('setsockopt')) {
+          _log('mDNS: Skipping $interfaceName - multicast not supported (VPN/virtual interface?)');
+        } else {
+          _log('mDNS: Failed to start on $interfaceName: ${errorStr.split('\n').first}');
+        }
         return;
       }
       
