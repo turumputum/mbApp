@@ -920,38 +920,53 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         _log('mDNS: Query sent from port ${querySocket?.port ?? "unknown"}, listening for responses...');
         
         // Try to receive responses manually via querySocket
-        final Duration waitTimeout = const Duration(seconds: 8);
-        final DateTime endTime = DateTime.now().add(waitTimeout);
-        int packetCount = 0;
-        
-        while (DateTime.now().isBefore(endTime) && querySocket != null) {
-          try {
-            final Datagram? datagram = querySocket.receive();
-            if (datagram != null && datagram.data.isNotEmpty) {
-              packetCount++;
-              _log('mDNS: Received packet #$packetCount on $interfaceName: ${datagram.data.length} bytes from ${datagram.address.address}:${datagram.port}');
-              
-              // Basic packet validation
-              if (datagram.data.length >= 12) {
-                final int flags = (datagram.data[2] << 8) | datagram.data[3];
-                final bool isResponse = (flags & 0x8000) != 0;
-                if (isResponse) {
-                  final int answerCount = (datagram.data[6] << 8) | datagram.data[7];
-                  _log('mDNS: DNS response with $answerCount answer record(s)');
+        // Use async stream listening instead of blocking receive()
+        if (querySocket != null) {
+          final Duration waitTimeout = const Duration(seconds: 8);
+          final DateTime endTime = DateTime.now().add(waitTimeout);
+          int packetCount = 0;
+          
+          // Listen to socket events asynchronously
+          final StreamSubscription<RawSocketEvent>? subscription = querySocket.listen(
+            (RawSocketEvent event) {
+              if (event == RawSocketEvent.read && DateTime.now().isBefore(endTime) && querySocket != null) {
+                try {
+                  final Datagram? datagram = querySocket.receive();
+                  if (datagram != null && datagram.data.isNotEmpty) {
+                    packetCount++;
+                    _log('mDNS: Received packet #$packetCount on $interfaceName: ${datagram.data.length} bytes from ${datagram.address.address}:${datagram.port}');
+                    
+                    // Basic packet validation
+                    if (datagram.data.length >= 12) {
+                      final int flags = (datagram.data[2] << 8) | datagram.data[3];
+                      final bool isResponse = (flags & 0x8000) != 0;
+                      if (isResponse) {
+                        final int answerCount = (datagram.data[6] << 8) | datagram.data[7];
+                        _log('mDNS: DNS response with $answerCount answer record(s)');
+                      }
+                    }
+                  }
+                } catch (e) {
+                  _log('mDNS: Error processing packet on $interfaceName: ${e.toString().split('\n').first}');
                 }
               }
-            } else {
-              await Future<void>.delayed(const Duration(milliseconds: 50));
-            }
-          } catch (e) {
-            if (e is! TimeoutException) {
-              _log('mDNS: Error receiving packet on $interfaceName: ${e.toString().split('\n').first}');
-            }
-            await Future<void>.delayed(const Duration(milliseconds: 50));
-          }
+            },
+            onError: (error) {
+              _log('mDNS: Socket error on $interfaceName: $error');
+            },
+            cancelOnError: false,
+          );
+          
+          // Wait for timeout
+          await Future<void>.delayed(waitTimeout);
+          
+          // Cancel subscription
+          await subscription?.cancel();
+          
+          _log('mDNS: Finished waiting for responses on $interfaceName (received $packetCount packet(s))');
+        } else {
+          _log('mDNS: Query socket is null, cannot receive responses');
         }
-        
-        _log('mDNS: Finished waiting for responses on $interfaceName (received $packetCount packet(s))');
         return;
       }
       
