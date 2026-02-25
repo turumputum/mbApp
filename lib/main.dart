@@ -129,6 +129,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   RawDatagramSocket? _mdnsSocket;
   StreamSubscription<RawSocketEvent>? _mdnsSocketSubscription;
   int _mdnsPacketCount = 0;
+  final Set<String> _mdnsDiscoveredDevices = <String>{}; // Track discovered device IDs
+  
+  // Temporary storage for parsed records during packet parsing
+  final List<Map<String, dynamic>> _ptrRecords = [];
+  final List<Map<String, dynamic>> _srvRecords = [];
+  final List<Map<String, dynamic>> _txtRecords = [];
+  final List<Map<String, dynamic>> _aRecords = [];
   List<String> get _removableRoots {
     if (Platform.isWindows) {
       // Windows: Check all available drive letters
@@ -347,8 +354,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 _log('mDNS: From: ${datagram.address.address}:${datagram.port}');
                 _log('mDNS: Size: ${datagram.data.length} bytes');
                 
-                // Parse and log DNS packet details
-                _parseAndLogDnsPacket(datagram.data);
+                // Parse and log DNS packet details, then extract devices
+                final Map<String, dynamic>? parsedData = _parseAndLogDnsPacket(datagram.data);
+                if (parsedData != null) {
+                  _processMdnsDeviceData(parsedData);
+                }
               }
             } catch (e) {
               _log('mDNS: Error processing packet: ${e.toString().split('\n').first}');
@@ -428,11 +438,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
   }
   
-  /// Parse and log DNS packet details
-  void _parseAndLogDnsPacket(Uint8List data) {
+  /// Parse and log DNS packet details, returns parsed device data if found
+  Map<String, dynamic>? _parseAndLogDnsPacket(Uint8List data) {
     if (data.length < 12) {
       _log('mDNS: Packet too short (${data.length} bytes), minimum 12 bytes required');
-      return;
+      return null;
     }
     
     try {
@@ -467,6 +477,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       _log('mDNS:   Answer RRs: $answerRRs');
       _log('mDNS:   Authority RRs: $authorityRRs');
       _log('mDNS:   Additional RRs: $additionalRRs');
+      
+      // Clear temporary storage
+      _ptrRecords.clear();
+      _srvRecords.clear();
+      _txtRecords.clear();
+      _aRecords.clear();
       
       int offset = 12;
       
@@ -520,10 +536,23 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       }
       
       _log('mDNS: ===== End of packet #$_mdnsPacketCount =====');
+      
+      // Return parsed device data if found
+      if (isResponse && answerRRs > 0) {
+        return {
+          'ptrRecords': List<Map<String, dynamic>>.from(_ptrRecords),
+          'srvRecords': List<Map<String, dynamic>>.from(_srvRecords),
+          'txtRecords': List<Map<String, dynamic>>.from(_txtRecords),
+          'aRecords': List<Map<String, dynamic>>.from(_aRecords),
+        };
+      }
+      
+      return null;
     } catch (e, stackTrace) {
       _log('mDNS: Error parsing DNS packet: ${e.toString().split('\n').first}');
       _log('mDNS: Stack trace: ${stackTrace.toString().split('\n').take(3).join('\n')}');
       _log('mDNS: Packet hex dump: ${data.take(64).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}...');
+      return null;
     }
   }
   
@@ -602,12 +631,22 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           if (rdlength == 4) {
             final String ip = '${rdata[0]}.${rdata[1]}.${rdata[2]}.${rdata[3]}';
             _log('mDNS:      A: $ip');
+            _aRecords.add({
+              'name': name,
+              'ip': ip,
+              'ttl': ttl,
+            });
           }
           break;
         case 12: // PTR record
           final ptrResult = _parseDnsName(data, currentOffset);
           final String ptrName = ptrResult[0] as String;
           _log('mDNS:      PTR: $ptrName');
+          _ptrRecords.add({
+            'name': name,
+            'ptr': ptrName,
+            'ttl': ttl,
+          });
           break;
         case 33: // SRV record
           if (rdlength >= 6) {
@@ -617,10 +656,24 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             final srvResult = _parseDnsName(data, currentOffset + 6);
             final String target = srvResult[0] as String;
             _log('mDNS:      SRV: Priority=$priority, Weight=$weight, Port=$port, Target=$target');
+            _srvRecords.add({
+              'name': name,
+              'priority': priority,
+              'weight': weight,
+              'port': port,
+              'target': target,
+              'ttl': ttl,
+            });
           }
           break;
         case 16: // TXT record
-          _log('mDNS:      TXT: ${_parseTxtRecord(rdata)}');
+          final String txtData = _parseTxtRecord(rdata);
+          _log('mDNS:      TXT: $txtData');
+          _txtRecords.add({
+            'name': name,
+            'txt': txtData,
+            'ttl': ttl,
+          });
           break;
         default:
           _log('mDNS:      DATA: ${rdata.take(32).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}${rdlength > 32 ? '...' : ''}');
@@ -667,6 +720,139 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       case 33: return 'SRV';
       default: return 'TYPE$type';
     }
+  }
+  
+  /// Process parsed mDNS device data and add devices to list
+  void _processMdnsDeviceData(Map<String, dynamic> parsedData) {
+    try {
+      final List<Map<String, dynamic>> ptrRecords = parsedData['ptrRecords'] as List<Map<String, dynamic>>;
+      final List<Map<String, dynamic>> srvRecords = parsedData['srvRecords'] as List<Map<String, dynamic>>;
+      final List<Map<String, dynamic>> txtRecords = parsedData['txtRecords'] as List<Map<String, dynamic>>;
+      final List<Map<String, dynamic>> aRecords = parsedData['aRecords'] as List<Map<String, dynamic>>;
+      
+      // Process each PTR record (service instance)
+      for (final ptrRecord in ptrRecords) {
+        final String ptrName = ptrRecord['ptr'] as String;
+        
+        // Extract device name from PTR (e.g., "FTP server on moduleBox 'mbGlassPanTouch'._ftp._tcp.local" -> "mbGlassPanTouch")
+        String? deviceName = _extractDeviceNameFromPtr(ptrName);
+        if (deviceName == null || deviceName.isEmpty) {
+          // Fallback: try to extract from service name
+          deviceName = ptrName.split('.').first;
+        }
+        
+        // Find corresponding SRV record
+        Map<String, dynamic>? srvRecord;
+        for (final srv in srvRecords) {
+          if (srv['name'] == ptrName) {
+            srvRecord = srv;
+            break;
+          }
+        }
+        
+        if (srvRecord == null) {
+          _log('mDNS: No SRV record found for PTR: $ptrName');
+          continue;
+        }
+        
+        final String target = srvRecord['target'] as String;
+        final int port = srvRecord['port'] as int;
+        
+        // Find corresponding A record for target hostname
+        String? ipAddress;
+        for (final a in aRecords) {
+          if (a['name'] == target) {
+            ipAddress = a['ip'] as String;
+            break;
+          }
+        }
+        
+        if (ipAddress == null) {
+          // Try to resolve hostname if it's already an IP
+          if (RegExp(r'^\d+\.\d+\.\d+\.\d+$').hasMatch(target)) {
+            ipAddress = target;
+          } else {
+            _log('mDNS: No A record found for target: $target');
+            continue;
+          }
+        }
+        
+        // Find TXT record if available
+        String? txtData;
+        for (final txt in txtRecords) {
+          if (txt['name'] == ptrName) {
+            txtData = txt['txt'] as String;
+            break;
+          }
+        }
+        
+        // Try to extract device name from TXT if not found in PTR
+        if (deviceName.isEmpty && txtData != null && txtData.isNotEmpty) {
+          final String? parsedName = _parseDeviceNameFromString(txtData);
+          if (parsedName != null && parsedName.isNotEmpty) {
+            deviceName = parsedName;
+          }
+        }
+        
+        // Create device identifier
+        final String deviceId = '$ipAddress:$port';
+        
+        // Check if device already discovered
+        if (_mdnsDiscoveredDevices.contains(deviceId)) {
+          _log('mDNS: Device $deviceId already discovered, skipping');
+          continue;
+        }
+        
+        _mdnsDiscoveredDevices.add(deviceId);
+        
+        // Create device item
+        final DeviceItem device = DeviceItem(
+          displayName: deviceName.isEmpty ? '(unnamed)' : deviceName,
+          kind: 'mDNS',
+          identifier: deviceId,
+          extra: <String, Object?>{
+            'hostname': target,
+            'ip': ipAddress,
+            'port': port,
+            'service_name': ptrName,
+            'service_type': '_ftp._tcp',
+            'txt': txtData,
+          },
+        );
+        
+        _log('mDNS: Adding device: "${deviceName.isEmpty ? '(unnamed)' : deviceName}" from $ipAddress:$port');
+        _addOrUpdateDevice(device, "mdns");
+      }
+    } catch (e, stackTrace) {
+      _log('mDNS: Error processing device data: ${e.toString().split('\n').first}');
+      _log('mDNS: Stack trace: ${stackTrace.toString().split('\n').take(3).join('\n')}');
+    }
+  }
+  
+  /// Extract device name from PTR record
+  /// Example: "FTP server on moduleBox 'mbGlassPanTouch'._ftp._tcp.local" -> "mbGlassPanTouch"
+  String? _extractDeviceNameFromPtr(String ptrName) {
+    // Try pattern: "FTP server on moduleBox 'deviceName'._ftp._tcp.local"
+    final RegExp pattern1 = RegExp(r"FTP server on moduleBox\s+'([^']+)'", caseSensitive: false);
+    final Match? match1 = pattern1.firstMatch(ptrName);
+    if (match1 != null && match1.groupCount >= 1) {
+      return match1.group(1);
+    }
+    
+    // Try pattern: "deviceName._ftp._tcp.local"
+    final RegExp pattern2 = RegExp(r"^([^.]+)\._ftp\._tcp\.local$", caseSensitive: false);
+    final Match? match2 = pattern2.firstMatch(ptrName);
+    if (match2 != null && match2.groupCount >= 1) {
+      return match2.group(1);
+    }
+    
+    // Fallback: take first part before first dot
+    final int firstDot = ptrName.indexOf('.');
+    if (firstDot > 0) {
+      return ptrName.substring(0, firstDot);
+    }
+    
+    return null;
   }
 
   @override
