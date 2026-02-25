@@ -874,43 +874,51 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       // Give a moment for initialization
       await Future<void>.delayed(const Duration(milliseconds: 100));
       
-      // If client didn't start, use shared socket if provided (mdns-sd approach)
-      // On Windows, mdns-sd uses ONE socket on INADDR_ANY for ALL interfaces
+      // If client didn't start, create socket on specific interface for sending
+      // On Windows, socket on anyIPv4 cannot send multicast to specific interface
+      // So we use interface-specific socket for sending, shared socket for receiving
       if (!clientStarted) {
-        if (sharedSocket != null) {
-          // Use shared socket for sending query (mdns-sd approach)
-          _log('mDNS: Using shared socket on anyIPv4:5353 for sending query (interface: ${interfaceAddress.address})...');
-          await _sendMdnsQuery(sharedSocket, serviceType, interfaceAddress: interfaceAddress);
-          await Future<void>.delayed(const Duration(milliseconds: 50));
-          // Don't create querySocket - we'll use sharedSocket for receiving
-          querySocket = null;
-        } else {
-          // Fallback: create socket for this interface only (should not happen if sharedSocket is created)
-          _log('mDNS: WARNING - No shared socket provided, creating fallback socket for $interfaceName');
+        try {
+          _log('mDNS: Creating socket on $interfaceName (${interfaceAddress.address}) for sending query...');
+          _log('mDNS: On Windows, need interface-specific socket for sending multicast');
+          
           try {
             querySocket = await RawDatagramSocket.bind(
-              InternetAddress.anyIPv4,
-              5353,
+              interfaceAddress, // Bind to specific interface for sending
+              0, // Use dynamic port for sending
               reuseAddress: true,
               reusePort: Platform.isWindows ? false : true,
             );
-            _log('mDNS: Fallback socket bound to anyIPv4:5353, port: ${querySocket.port}');
-            
+            _log('mDNS: Query socket bound to dynamic port ${querySocket.port} on $interfaceName');
+          } catch (e) {
+            _log('mDNS: Failed to bind query socket: ${e.toString().split('\n').first}');
+            querySocket = null;
+          }
+          
+          if (querySocket != null) {
             try {
               querySocket.broadcastEnabled = true;
-              _log('mDNS: Broadcast enabled on fallback socket');
+              _log('mDNS: Broadcast enabled on query socket');
             } catch (e) {
               _log('mDNS: Failed to enable broadcast: ${e.toString().split('\n').first}');
             }
             
-            await Future<void>.delayed(const Duration(milliseconds: 100));
-            _log('mDNS: Sending query from fallback socket (interface: ${interfaceAddress.address})...');
+            // Send query from interface-specific socket
+            _log('mDNS: Sending query from interface-specific socket (interface: ${interfaceAddress.address})...');
             await _sendMdnsQuery(querySocket, serviceType, interfaceAddress: interfaceAddress);
             await Future<void>.delayed(const Duration(milliseconds: 50));
-          } catch (e, stackTrace) {
-            _log('mDNS: Failed to create/send on $interfaceName: ${e.toString().split('\n').first}');
-            _log('mDNS: Error stack trace: ${stackTrace.toString().split('\n').take(3).join('\n')}');
+            
+            // Close query socket after sending (responses will come to shared socket)
+            try {
+              querySocket.close();
+            } catch (e) {
+              // Ignore close errors
+            }
+            querySocket = null;
           }
+        } catch (e, stackTrace) {
+          _log('mDNS: Failed to create/send on $interfaceName: ${e.toString().split('\n').first}');
+          _log('mDNS: Error stack trace: ${stackTrace.toString().split('\n').take(3).join('\n')}');
         }
       }
       
