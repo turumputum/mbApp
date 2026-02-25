@@ -182,6 +182,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
   
   /// Initialize mDNS socket (long-lived, opened at startup)
+  /// Uses exact mdns-sd approach: bind(INADDR_ANY:5353) + IP_ADD_MEMBERSHIP
   Future<void> _initializeMdnsSocket() async {
     if (!Platform.isWindows) {
       // On non-Windows, we don't need a persistent socket
@@ -189,18 +190,20 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
     
     try {
-      _log('mDNS: Initializing persistent socket on anyIPv4:5353...');
+      _log('mDNS: Initializing persistent socket on anyIPv4:5353 (mdns-sd approach)...');
+      _log('mDNS: Step 1: bind(INADDR_ANY:5353) with SO_REUSEADDR');
       
-      // Create ONE socket on anyIPv4:5353
+      // Step 1: Bind to INADDR_ANY:5353 with SO_REUSEADDR (as per mdns-sd)
       _mdnsSocket = await RawDatagramSocket.bind(
         InternetAddress.anyIPv4, // INADDR_ANY - as per mdns-sd
         5353, // mDNS port - SAME for sending and receiving
-        reuseAddress: true,
+        reuseAddress: true, // SO_REUSEADDR - required for Windows
         reusePort: false, // Not supported on Windows
       );
       
       _log('mDNS: Socket bound to anyIPv4:5353, port: ${_mdnsSocket!.port}');
       
+      // Step 2: Enable broadcast (optional, but may help)
       try {
         _mdnsSocket!.broadcastEnabled = true;
         _log('mDNS: Broadcast enabled on socket');
@@ -208,7 +211,21 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         _log('mDNS: Failed to enable broadcast: ${e.toString().split('\n').first}');
       }
       
-      // Set up persistent listener
+      // Step 3: Join multicast group (IP_ADD_MEMBERSHIP) - CRITICAL for Windows
+      // On Windows, kernel filters multicast packets - only delivers packets from joined groups
+      // This is the key difference from Linux/macOS
+      try {
+        _log('mDNS: Step 2: Joining multicast group 224.0.0.251 (IP_ADD_MEMBERSHIP)...');
+        final InternetAddress multicastAddress = InternetAddress('224.0.0.251');
+        _mdnsSocket!.joinMulticast(multicastAddress);
+        _log('mDNS: Successfully joined multicast group 224.0.0.251');
+      } catch (e) {
+        _log('mDNS: Failed to join multicast group: ${e.toString().split('\n').first}');
+        _log('mDNS: This may prevent receiving multicast packets on Windows');
+        // Continue anyway - might still work in some cases
+      }
+      
+      // Step 4: Set up persistent listener
       _mdnsPacketCount = 0;
       _mdnsSocketSubscription = _mdnsSocket!.listen(
         (RawSocketEvent event) {
@@ -243,7 +260,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       
       // Give socket a moment to be ready
       await Future<void>.delayed(const Duration(milliseconds: 100));
-      _log('mDNS: Persistent socket ready and listening');
+      _log('mDNS: Persistent socket ready and listening (mdns-sd approach)');
       
     } catch (e, stackTrace) {
       _log('mDNS: Failed to initialize socket: ${e.toString().split('\n').first}');
