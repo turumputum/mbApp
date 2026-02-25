@@ -873,6 +873,50 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       // Give a moment for initialization
       await Future<void>.delayed(const Duration(milliseconds: 100));
       
+      // If client didn't start, create receive socket BEFORE sending query
+      RawDatagramSocket? receiveSocket;
+      if (!clientStarted) {
+        try {
+          _log('mDNS: Creating receive socket on anyIPv4:5353 BEFORE sending query...');
+          receiveSocket = await RawDatagramSocket.bind(
+            InternetAddress.anyIPv4,
+            5353,
+            reuseAddress: true,
+            reusePort: Platform.isWindows ? false : true,
+          );
+          _log('mDNS: Receive socket created on anyIPv4:5353, port: ${receiveSocket.port}');
+          
+          try {
+            receiveSocket.broadcastEnabled = true;
+            _log('mDNS: Broadcast enabled on receive socket');
+          } catch (e) {
+            _log('mDNS: Failed to enable broadcast on receive socket: ${e.toString().split('\n').first}');
+          }
+          
+          // Try to join multicast (may fail with 10042, but we'll try)
+          try {
+            final InternetAddress multicastAddress = InternetAddress('224.0.0.251');
+            receiveSocket.joinMulticast(multicastAddress);
+            _log('mDNS: Receive socket joined multicast group 224.0.0.251');
+          } catch (e) {
+            final String errorStr = e.toString();
+            if (errorStr.contains('10042')) {
+              _log('mDNS: joinMulticast failed with 10042 on receive socket (expected), continuing without it');
+              _log('mDNS: Socket may still receive multicast packets on Windows');
+            } else {
+              _log('mDNS: Failed to join multicast on receive socket: ${errorStr.split('\n').first}');
+            }
+          }
+          
+          // Give socket a moment to be ready
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+          _log('mDNS: Receive socket is ready');
+        } catch (e) {
+          _log('mDNS: Failed to create receive socket: ${e.toString().split('\n').first}');
+          receiveSocket = null;
+        }
+      }
+      
       // Create query socket for this interface
       // Use port 5353 (same as receive port) to ensure responses come to the right place
       try {
@@ -914,27 +958,27 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       }
       
       // Only use client.lookup() if client started successfully
-      // If client.start() failed with 10042, we'll receive responses manually via querySocket
+      // If client.start() failed with 10042, we'll receive responses manually
       if (!clientStarted) {
         _log('mDNS: Client not started, will receive responses manually on $interfaceName');
         _log('mDNS: Query sent from port ${querySocket?.port ?? "unknown"}, listening for responses...');
         
-        // Try to receive responses manually via querySocket
-        // Use async stream listening instead of blocking receive()
-        if (querySocket != null) {
+        // Listen for responses
+        if (receiveSocket != null) {
           final Duration waitTimeout = const Duration(seconds: 8);
-          final DateTime endTime = DateTime.now().add(waitTimeout);
           int packetCount = 0;
           
+          _log('mDNS: Starting to listen for responses on receive socket (port ${receiveSocket.port})...');
+          
           // Listen to socket events asynchronously
-          final StreamSubscription<RawSocketEvent>? subscription = querySocket.listen(
+          final StreamSubscription<RawSocketEvent>? subscription = receiveSocket.listen(
             (RawSocketEvent event) {
-              if (event == RawSocketEvent.read && DateTime.now().isBefore(endTime) && querySocket != null) {
+              if (event == RawSocketEvent.read && receiveSocket != null) {
                 try {
-                  final Datagram? datagram = querySocket.receive();
+                  final Datagram? datagram = receiveSocket.receive();
                   if (datagram != null && datagram.data.isNotEmpty) {
                     packetCount++;
-                    _log('mDNS: Received packet #$packetCount on $interfaceName: ${datagram.data.length} bytes from ${datagram.address.address}:${datagram.port}');
+                    _log('mDNS: Received packet #$packetCount: ${datagram.data.length} bytes from ${datagram.address.address}:${datagram.port}');
                     
                     // Basic packet validation
                     if (datagram.data.length >= 12) {
@@ -947,25 +991,52 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                     }
                   }
                 } catch (e) {
-                  _log('mDNS: Error processing packet on $interfaceName: ${e.toString().split('\n').first}');
+                  _log('mDNS: Error processing packet: ${e.toString().split('\n').first}');
                 }
               }
             },
             onError: (error) {
-              _log('mDNS: Socket error on $interfaceName: $error');
+              _log('mDNS: Receive socket error: $error');
             },
             cancelOnError: false,
           );
           
           // Wait for timeout
+          _log('mDNS: Waiting ${waitTimeout.inSeconds} seconds for responses...');
           await Future<void>.delayed(waitTimeout);
           
-          // Cancel subscription
+          // Cancel subscription and close receive socket
           await subscription?.cancel();
+          try {
+            receiveSocket.close();
+          } catch (e) {
+            // Ignore close errors
+          }
           
           _log('mDNS: Finished waiting for responses on $interfaceName (received $packetCount packet(s))');
+        } else if (querySocket != null) {
+          // Fallback: try to receive on query socket
+          _log('mDNS: Receive socket not available, trying to receive on query socket...');
+          final Duration waitTimeout = const Duration(seconds: 8);
+          final DateTime endTime = DateTime.now().add(waitTimeout);
+          int packetCount = 0;
+          
+          while (DateTime.now().isBefore(endTime)) {
+            try {
+              final Datagram? datagram = querySocket.receive();
+              if (datagram != null && datagram.data.isNotEmpty) {
+                packetCount++;
+                _log('mDNS: Received packet #$packetCount on query socket: ${datagram.data.length} bytes from ${datagram.address.address}:${datagram.port}');
+              } else {
+                await Future<void>.delayed(const Duration(milliseconds: 50));
+              }
+            } catch (e) {
+              await Future<void>.delayed(const Duration(milliseconds: 50));
+            }
+          }
+          _log('mDNS: Finished waiting for responses on query socket (received $packetCount packet(s))');
         } else {
-          _log('mDNS: Query socket is null, cannot receive responses');
+          _log('mDNS: No socket available for receiving responses');
         }
         return;
       }
