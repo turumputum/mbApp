@@ -990,129 +990,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           }
         }
         } else {
-          // Client didn't start (error 10042), but we can still try to use it
-          // The client might work for sending queries, and responses might come through
-          // other interfaces or be received by the query socket
-          _log('mDNS: Using client without start() on $interfaceName (query-only mode)');
-          
-          try {
-            // Try to use lookup() - it might still work for sending queries
-            // Responses will be received if they come through
-            final Stream<PtrResourceRecord> ptrStream = client.lookup<PtrResourceRecord>(
-              ResourceRecordQuery.serverPointer(serviceType),
-            );
-            
-            await for (final PtrResourceRecord ptr in ptrStream.timeout(
-              ptrTimeout,
-              onTimeout: (sink) {
-                sink.close();
-              },
-            )) {
-              final String serviceName = ptr.domainName;
-              _log('mDNS: Found service: $serviceName on $interfaceName (query-only mode)');
-              
-              // Process same as normal mode
-              final Duration srvTimeout = const Duration(seconds: 5);
-              
-              try {
-                await for (final SrvResourceRecord srv in client.lookup<SrvResourceRecord>(
-                  ResourceRecordQuery.service(serviceName),
-                ).timeout(
-                  srvTimeout,
-                  onTimeout: (sink) {
-                    sink.close();
-                  },
-                )) {
-                  final String host = srv.target;
-                  final int port = srv.port;
-                  final String deviceId = '$host:$port';
-                  
-                  if (uniqueDeviceIds.contains(deviceId)) {
-                    continue;
-                  }
-                  
-                  String? deviceName;
-                  try {
-                    await for (final TxtResourceRecord txt in client.lookup<TxtResourceRecord>(
-                      ResourceRecordQuery.text(serviceName),
-                    ).timeout(
-                      const Duration(seconds: 3),
-                      onTimeout: (sink) {
-                        sink.close();
-                      },
-                    )) {
-                      String txtData;
-                      if (txt.text is List) {
-                        txtData = (txt.text as List).join(' ');
-                      } else {
-                        txtData = txt.text.toString();
-                      }
-                      
-                      final String? parsedName = _parseDeviceNameFromString(txtData);
-                      if (parsedName != null) {
-                        deviceName = parsedName;
-                        break;
-                      }
-                    }
-                  } catch (e) {
-                    // Ignore TXT errors
-                  }
-                  
-                  if (deviceName == null || deviceName.isEmpty) {
-                    final String? parsedName = _parseDeviceNameFromString(serviceName);
-                    if (parsedName != null) {
-                      deviceName = parsedName;
-                    } else {
-                      deviceName = serviceName.replaceAll('.$serviceType.local', '').replaceAll('.$serviceType', '');
-                    }
-                  }
-                  
-                  String? ipAddress;
-                  if (RegExp(r'^\d+\.\d+\.\d+\.\d+$').hasMatch(host)) {
-                    ipAddress = host;
-                  } else {
-                    try {
-                      final List<InternetAddress> addresses = await InternetAddress.lookup(host).timeout(
-                        const Duration(milliseconds: 200),
-                        onTimeout: () {
-                          throw TimeoutException('DNS lookup timeout');
-                        },
-                      );
-                      if (addresses.isNotEmpty) {
-                        ipAddress = addresses.first.address;
-                      }
-                    } catch (e) {
-                      ipAddress = host;
-                    }
-                  }
-                  
-                  if (ipAddress == null || ipAddress.isEmpty) {
-                    continue;
-                  }
-                  
-                  uniqueDeviceIds.add(deviceId);
-                  final DeviceItem d = DeviceItem(
-                    displayName: deviceName.isEmpty ? '(unnamed)' : deviceName,
-                    kind: 'mDNS',
-                    identifier: '$ipAddress:$port',
-                    extra: <String, Object?>{
-                      'hostname': host,
-                      'ip': ipAddress,
-                      'port': port,
-                      'service_name': serviceName,
-                      'service_type': serviceType,
-                    },
-                  );
-                  _log('mDNS: adding/updating "${deviceName.isEmpty ? '(unnamed)' : deviceName}" from $ipAddress:$port on $interfaceName');
-                  _addOrUpdateDevice(d, "mdns");
-                }
-              } catch (e) {
-                // Ignore SRV errors
-              }
-            }
-          } catch (e) {
-            _log('mDNS: Query-only mode failed on $interfaceName: ${e.toString().split('\n').first}');
-          }
+          // Client didn't start (error 10042) - can't use lookup() without start()
+          // Just send queries - responses will be received via shared client on working interface
+          _log('mDNS: Query sent on $interfaceName, responses via shared client');
+          // Wait a bit to allow responses to come through shared client
+          await Future<void>.delayed(ptrTimeout);
         }
       } catch (e) {
         _log('mDNS: Error on $interfaceName: ${e.toString().split('\n').first}');
@@ -1167,16 +1049,46 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             return;
           }
           
+          // Find first interface where client.start() works for receiving responses
+          MDnsClient? sharedClient;
+          String? sharedClientName;
+          
+          for (final entry in interfaceList) {
+            try {
+              final testClient = MDnsClient(rawDatagramSocketFactory:
+              (dynamic host, int port,
+                {bool? reuseAddress, bool? reusePort, int? ttl}) async {
+                return await RawDatagramSocket.bind(
+                  entry.address, 
+                  port,
+                  reuseAddress: true, 
+                  reusePort: false, 
+                  ttl: ttl ?? 255
+                );
+              });
+              
+              await testClient.start();
+              sharedClient = testClient;
+              sharedClientName = entry.name;
+              _log('mDNS: Using $sharedClientName for receiving responses');
+              break;
+            } catch (e) {
+              // Try next interface
+              continue;
+            }
+          }
+          
           _log('mDNS: Scanning on ${interfaceList.length} interface(s) in parallel');
           
           // Scan all interfaces in parallel for each service type
           for (final String serviceType in serviceTypes) {
             _log('mDNS: Discovering $serviceType services...');
             
-            // Use eagerError: false to continue even if one interface fails
+            // Send queries on all interfaces in parallel
             await Future.wait(
               interfaceList.map((entry) async {
                 try {
+                  // Just send query, don't try to receive on interfaces where start() fails
                   await _scanMdnsOnInterface(entry.address, entry.name, serviceType, uniqueDeviceIds);
                 } catch (e) {
                   // Error already logged in _scanMdnsOnInterface, just continue
@@ -1185,6 +1097,136 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               }),
               eagerError: false, // Continue even if one interface fails
             );
+            
+            // If we have a shared client, use it to receive responses
+            if (sharedClient != null) {
+              try {
+                final Duration ptrTimeout = const Duration(seconds: 8);
+                final Stream<PtrResourceRecord> ptrStream = sharedClient.lookup<PtrResourceRecord>(
+                  ResourceRecordQuery.serverPointer(serviceType),
+                );
+                
+                await for (final PtrResourceRecord ptr in ptrStream.timeout(
+                  ptrTimeout,
+                  onTimeout: (sink) {
+                    sink.close();
+                  },
+                )) {
+                  final String serviceName = ptr.domainName;
+                  _log('mDNS: Found service: $serviceName via shared client');
+                  
+                  // Process same as in _scanMdnsOnInterface
+                  final Duration srvTimeout = const Duration(seconds: 5);
+                  
+                  try {
+                    await for (final SrvResourceRecord srv in sharedClient.lookup<SrvResourceRecord>(
+                      ResourceRecordQuery.service(serviceName),
+                    ).timeout(
+                      srvTimeout,
+                      onTimeout: (sink) {
+                        sink.close();
+                      },
+                    )) {
+                      final String host = srv.target;
+                      final int port = srv.port;
+                      final String deviceId = '$host:$port';
+                      
+                      if (uniqueDeviceIds.contains(deviceId)) {
+                        continue;
+                      }
+                      
+                      String? deviceName;
+                      try {
+                        await for (final TxtResourceRecord txt in sharedClient.lookup<TxtResourceRecord>(
+                          ResourceRecordQuery.text(serviceName),
+                        ).timeout(
+                          const Duration(seconds: 3),
+                          onTimeout: (sink) {
+                            sink.close();
+                          },
+                        )) {
+                          String txtData;
+                          if (txt.text is List) {
+                            txtData = (txt.text as List).join(' ');
+                          } else {
+                            txtData = txt.text.toString();
+                          }
+                          
+                          final String? parsedName = _parseDeviceNameFromString(txtData);
+                          if (parsedName != null) {
+                            deviceName = parsedName;
+                            break;
+                          }
+                        }
+                      } catch (e) {
+                        // Ignore TXT errors
+                      }
+                      
+                      if (deviceName == null || deviceName.isEmpty) {
+                        final String? parsedName = _parseDeviceNameFromString(serviceName);
+                        if (parsedName != null) {
+                          deviceName = parsedName;
+                        } else {
+                          deviceName = serviceName.replaceAll('.$serviceType.local', '').replaceAll('.$serviceType', '');
+                        }
+                      }
+                      
+                      String? ipAddress;
+                      if (RegExp(r'^\d+\.\d+\.\d+\.\d+$').hasMatch(host)) {
+                        ipAddress = host;
+                      } else {
+                        try {
+                          final List<InternetAddress> addresses = await InternetAddress.lookup(host).timeout(
+                            const Duration(milliseconds: 200),
+                            onTimeout: () {
+                              throw TimeoutException('DNS lookup timeout');
+                            },
+                          );
+                          if (addresses.isNotEmpty) {
+                            ipAddress = addresses.first.address;
+                          }
+                        } catch (e) {
+                          ipAddress = host;
+                        }
+                      }
+                      
+                      if (ipAddress == null || ipAddress.isEmpty) {
+                        continue;
+                      }
+                      
+                      uniqueDeviceIds.add(deviceId);
+                      final DeviceItem d = DeviceItem(
+                        displayName: deviceName.isEmpty ? '(unnamed)' : deviceName,
+                        kind: 'mDNS',
+                        identifier: '$ipAddress:$port',
+                        extra: <String, Object?>{
+                          'hostname': host,
+                          'ip': ipAddress,
+                          'port': port,
+                          'service_name': serviceName,
+                          'service_type': serviceType,
+                        },
+                      );
+                      _log('mDNS: adding/updating "${deviceName.isEmpty ? '(unnamed)' : deviceName}" from $ipAddress:$port');
+                      _addOrUpdateDevice(d, "mdns");
+                    }
+                  } catch (e) {
+                    // Ignore SRV errors
+                  }
+                }
+              } catch (e) {
+                _log('mDNS: Error receiving via shared client: ${e.toString().split('\n').first}');
+              }
+            }
+          }
+          
+          // Clean up shared client
+          if (sharedClient != null) {
+            try {
+              sharedClient.stop();
+            } catch (e) {
+              // Ignore
+            }
           }
         } catch (e) {
           _log('mDNS: Failed to get interfaces: ${e.toString().split('\n').first}');
