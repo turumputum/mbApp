@@ -867,19 +867,36 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     // Skip client creation and use query-only mode with shared receiver
     if (hasWifi && Platform.isWindows) {
       _log('mDNS: Wi-Fi detected, skipping client.start() for $interfaceName to avoid error 10042');
-      // Just send queries, receiving will be handled by shared client
+      // Send queries from port 5353 (same as receive port) to ensure responses come to the right place
+      // Use reusePort: true to allow multiple sockets on the same port
       try {
-        querySocket = await RawDatagramSocket.bind(
-          interfaceAddress,
-          0,
-        );
+        try {
+          querySocket = await RawDatagramSocket.bind(
+            interfaceAddress,
+            5353, // Use mDNS port for sending too
+            reuseAddress: true,
+            reusePort: true, // Allow multiple sockets on same port
+          );
+          _log('mDNS: Query socket bound to port 5353 with reusePort: true on $interfaceName');
+        } catch (e) {
+          // If reusePort fails, try without it
+          _log('mDNS: Failed with reusePort: true, trying without: ${e.toString().split('\n').first}');
+          querySocket = await RawDatagramSocket.bind(
+            interfaceAddress,
+            5353,
+            reuseAddress: true,
+            reusePort: false,
+          );
+          _log('mDNS: Query socket bound to port 5353 without reusePort on $interfaceName');
+        }
+        
         querySocket.broadcastEnabled = true;
         
         // Send query manually
         await _sendMdnsQuery(querySocket, serviceType, interfaceAddress: interfaceAddress);
-        _log('mDNS: Query sent on $interfaceName, responses will be received via shared client');
+        _log('mDNS: Query sent on $interfaceName from port ${querySocket.port}, responses will be received via shared socket');
         
-        // Wait a bit for responses (shared client will handle receiving)
+        // Wait a bit for responses (shared socket will handle receiving)
         await Future<void>.delayed(const Duration(seconds: 8));
       } catch (e) {
         _log('mDNS: Failed to send query on $interfaceName: ${e.toString().split('\n').first}');
@@ -1203,15 +1220,30 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           
           // Create shared receive socket on anyIPv4 for receiving responses if Wi-Fi is present
           // We can't use MDnsClient.start() because it fails with error 10042 on Windows with Wi-Fi
+          // Try with reusePort: true first - this may help avoid error 10042
           RawDatagramSocket? sharedReceiveSocket;
           if (hasWifi) {
             try {
-              sharedReceiveSocket = await RawDatagramSocket.bind(
-                InternetAddress.anyIPv4,
-                5353, // mDNS port
-                reuseAddress: true,
-                reusePort: false,
-              );
+              // First try with reusePort: true - this may help on Windows
+              try {
+                sharedReceiveSocket = await RawDatagramSocket.bind(
+                  InternetAddress.anyIPv4,
+                  5353, // mDNS port
+                  reuseAddress: true,
+                  reusePort: true, // Try reusePort: true to avoid conflicts
+                );
+                _log('mDNS: Shared receive socket created with reusePort: true');
+              } catch (e) {
+                // If that fails, try without reusePort
+                _log('mDNS: Failed with reusePort: true, trying without: ${e.toString().split('\n').first}');
+                sharedReceiveSocket = await RawDatagramSocket.bind(
+                  InternetAddress.anyIPv4,
+                  5353,
+                  reuseAddress: true,
+                  reusePort: false,
+                );
+                _log('mDNS: Shared receive socket created with reusePort: false');
+              }
               
               try {
                 sharedReceiveSocket.broadcastEnabled = true;
@@ -1225,11 +1257,17 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 sharedReceiveSocket.joinMulticast(multicastAddress);
                 _log('mDNS: Shared receive socket joined multicast group on anyIPv4');
               } catch (e) {
-                _log('mDNS: Failed to join multicast on shared socket (may still receive responses): ${e.toString().split('\n').first}');
+                final String errorStr = e.toString();
+                if (errorStr.contains('10042')) {
+                  _log('mDNS: joinMulticast failed with 10042 (expected on Windows with Wi-Fi), continuing without multicast join');
+                  _log('mDNS: Socket may still receive unicast responses');
+                } else {
+                  _log('mDNS: Failed to join multicast on shared socket: ${errorStr.split('\n').first}');
+                }
                 // Continue anyway - socket might still receive responses
               }
               
-              _log('mDNS: Shared receive socket created on anyIPv4 (port 5353)');
+              _log('mDNS: Shared receive socket ready on anyIPv4 (port 5353)');
             } catch (e) {
               _log('mDNS: Failed to create shared receive socket: ${e.toString().split('\n').first}');
               sharedReceiveSocket = null;
