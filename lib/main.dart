@@ -815,7 +815,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           interfaceAddress, 
           port,
           reuseAddress: true, 
-          reusePort: true, 
+          reusePort: Platform.isWindows ? false : true, // reusePort not supported on Windows
           ttl: ttl ?? 255
         );
         
@@ -854,7 +854,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           interfaceAddress,
           0,
           reuseAddress: true,
-          reusePort: true,
+          reusePort: Platform.isWindows ? false : true, // reusePort not supported on Windows
         );
         querySocket.broadcastEnabled = true;
         
