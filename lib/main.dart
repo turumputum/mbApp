@@ -803,17 +803,29 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   /// Receive mDNS responses via shared client on anyIPv4
   Future<void> _receiveViaSharedClient(MDnsClient sharedClient, String serviceType, Set<String> uniqueDeviceIds) async {
     try {
-      final Duration ptrTimeout = const Duration(seconds: 8);
+      _log('mDNS: Starting to receive responses via shared client for $serviceType');
+      final Duration ptrTimeout = const Duration(seconds: 10); // Increased timeout
+      
+      // Start listening BEFORE sending queries to ensure we don't miss responses
+      // lookup() will also send its own query, but we'll receive responses to both
       final Stream<PtrResourceRecord> ptrStream = sharedClient.lookup<PtrResourceRecord>(
         ResourceRecordQuery.serverPointer(serviceType),
       );
       
+      _log('mDNS: Shared client is now listening for PTR records (timeout: ${ptrTimeout.inSeconds}s)...');
+      
+      // Give a moment for the stream to be ready
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      
+      int recordCount = 0;
       await for (final PtrResourceRecord ptr in ptrStream.timeout(
         ptrTimeout,
         onTimeout: (sink) {
+          _log('mDNS: Timeout waiting for PTR records via shared client (received $recordCount records)');
           sink.close();
         },
       )) {
+        recordCount++;
         final String serviceName = ptr.domainName;
         _log('mDNS: Found service: $serviceName via shared client');
         
@@ -915,11 +927,18 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             _addOrUpdateDevice(d, "mdns");
           }
         } catch (e) {
-          // Ignore SRV errors
+          _log('mDNS: Error getting SRV record for $serviceName: ${e.toString().split('\n').first}');
         }
+      }
+      
+      if (recordCount > 0) {
+        _log('mDNS: Received $recordCount PTR record(s) via shared client');
+      } else {
+        _log('mDNS: No PTR records received via shared client');
       }
     } catch (e) {
       _log('mDNS: Error in shared client: ${e.toString().split('\n').first}');
+      _log('mDNS: Stack trace: ${StackTrace.current.toString().split('\n').take(3).join('\n')}');
     }
   }
 
@@ -1302,13 +1321,17 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           for (final String serviceType in serviceTypes) {
             _log('mDNS: Discovering $serviceType services...');
             
-            // Start receiving via shared client if available
+            // Start receiving via shared client if available (run in parallel with sending queries)
             Future<void>? sharedReceiveFuture;
             if (sharedClient != null) {
+              _log('mDNS: Starting shared client receiver in parallel with query sending');
               sharedReceiveFuture = _receiveViaSharedClient(sharedClient, serviceType, uniqueDeviceIds);
+              // Give shared client a moment to start
+              await Future<void>.delayed(const Duration(milliseconds: 100));
             }
             
-            // Use eagerError: false to continue even if one interface fails
+            // Send queries on all interfaces in parallel
+            _log('mDNS: Sending queries on ${interfaceList.length} interface(s)...');
             await Future.wait(
               interfaceList.map((entry) async {
                 try {
@@ -1320,6 +1343,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               }),
               eagerError: false, // Continue even if one interface fails
             );
+            
+            _log('mDNS: All queries sent, waiting for shared client to receive responses...');
             
             // Wait for shared client to finish receiving
             if (sharedReceiveFuture != null) {
