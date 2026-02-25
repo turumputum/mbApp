@@ -778,6 +778,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final InternetAddress multicastAddress = InternetAddress('224.0.0.251');
       const int mdnsPort = 5353;
       
+      // Get the local port of the socket to log it
+      final int localPort = socket.port;
+      _log('mDNS: Sending query from local port $localPort to ${multicastAddress.address}:$mdnsPort');
+      
       final int bytesSent = socket.send(
         Uint8List.fromList(packet),
         multicastAddress,
@@ -787,10 +791,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final String interfaceInfo = interfaceAddress != null 
           ? ' on interface ${interfaceAddress.address}' 
           : '';
-      _log('mDNS: Sent query for $serviceType$interfaceInfo, $bytesSent bytes sent to ${multicastAddress.address}:$mdnsPort');
+      _log('mDNS: Sent query for $serviceType$interfaceInfo, $bytesSent bytes sent from port $localPort to ${multicastAddress.address}:$mdnsPort');
       
       if (bytesSent == 0) {
         _log('mDNS: Warning - no bytes were sent$interfaceInfo, check socket configuration');
+      } else if (bytesSent != packet.length) {
+        _log('mDNS: Warning - only $bytesSent of ${packet.length} bytes were sent$interfaceInfo');
       }
     } catch (e) {
       final String interfaceInfo = interfaceAddress != null 
@@ -811,6 +817,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       (dynamic host, int port,
         {bool? reuseAddress, bool? reusePort, int? ttl}) async {
       try {
+        _log('mDNS: Attempting to bind socket on $interfaceName (${interfaceAddress.address}) port $port, reusePort: ${Platform.isWindows ? false : true}');
         final RawDatagramSocket socket = await RawDatagramSocket.bind(
           interfaceAddress, 
           port,
@@ -819,25 +826,39 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           ttl: ttl ?? 255
         );
         
+        _log('mDNS: Socket bound successfully on $interfaceName, port: ${socket.port}');
+        
         try {
           socket.broadcastEnabled = true;
+          _log('mDNS: Broadcast enabled on $interfaceName');
         } catch (e) {
+          _log('mDNS: Failed to enable broadcast on $interfaceName: ${e.toString().split('\n').first}');
           // Ignore broadcast setting errors
         }
         
         return socket;
-      } catch (e) {
+      } catch (e, stackTrace) {
         _log('mDNS: Failed to bind on $interfaceName (${interfaceAddress.address}): ${e.toString().split('\n').first}');
+        _log('mDNS: Bind error stack trace: ${stackTrace.toString().split('\n').take(3).join('\n')}');
         rethrow;
       }
       });  
 
       try {
+        _log('mDNS: Attempting to start client on $interfaceName (${interfaceAddress.address})...');
         await client.start();
-      } catch (e) {
+        _log('mDNS: Client started successfully on $interfaceName');
+      } catch (e, stackTrace) {
         // Check if it's a protocol option error (common on VPN/virtual interfaces)
         final String errorStr = e.toString();
+        final String stackStr = stackTrace.toString();
+        
+        _log('mDNS: Error starting client on $interfaceName: $errorStr');
+        _log('mDNS: Error stack trace: ${stackStr.split('\n').take(5).join('\n')}');
+        
         if (errorStr.contains('10042') || errorStr.contains('getsockopt') || errorStr.contains('setsockopt')) {
+          _log('mDNS: Error 10042 detected on $interfaceName - protocol option error');
+          _log('mDNS: This may be caused by Windows multicast behavior or unsupported socket options');
           _log('mDNS: Skipping $interfaceName - multicast not supported (VPN/virtual interface?)');
         } else {
           _log('mDNS: Failed to start on $interfaceName: ${errorStr.split('\n').first}');
@@ -849,20 +870,43 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       await Future<void>.delayed(const Duration(milliseconds: 100));
       
       // Create query socket for this interface
+      // Use port 5353 (same as receive port) to ensure responses come to the right place
       try {
-        querySocket = await RawDatagramSocket.bind(
-          interfaceAddress,
-          0,
-          reuseAddress: true,
-          reusePort: Platform.isWindows ? false : true, // reusePort not supported on Windows
-        );
-        querySocket.broadcastEnabled = true;
+        _log('mDNS: Creating query socket on $interfaceName (${interfaceAddress.address})...');
+        try {
+          querySocket = await RawDatagramSocket.bind(
+            interfaceAddress,
+            5353, // Use mDNS port for sending to match receive port
+            reuseAddress: true,
+            reusePort: Platform.isWindows ? false : true, // reusePort not supported on Windows
+          );
+          _log('mDNS: Query socket bound to port 5353 with reusePort: ${Platform.isWindows ? false : true} on $interfaceName');
+        } catch (e) {
+          // If binding to 5353 fails, try dynamic port
+          _log('mDNS: Failed to bind query socket to port 5353, trying dynamic port: ${e.toString().split('\n').first}');
+          querySocket = await RawDatagramSocket.bind(
+            interfaceAddress,
+            0, // Fallback to dynamic port
+            reuseAddress: true,
+            reusePort: Platform.isWindows ? false : true,
+          );
+          _log('mDNS: Query socket bound to dynamic port ${querySocket.port} on $interfaceName');
+        }
+        
+        try {
+          querySocket.broadcastEnabled = true;
+          _log('mDNS: Broadcast enabled on query socket');
+        } catch (e) {
+          _log('mDNS: Failed to enable broadcast on query socket: ${e.toString().split('\n').first}');
+        }
         
         // Send query manually
+        _log('mDNS: Sending query from port ${querySocket.port} on $interfaceName...');
         await _sendMdnsQuery(querySocket, serviceType, interfaceAddress: interfaceAddress);
         await Future<void>.delayed(const Duration(milliseconds: 50));
-      } catch (e) {
+      } catch (e, stackTrace) {
         _log('mDNS: Failed to send query on $interfaceName: ${e.toString().split('\n').first}');
+        _log('mDNS: Query error stack trace: ${stackTrace.toString().split('\n').take(3).join('\n')}');
       }
       
       // Query for the specific service type with timeout
