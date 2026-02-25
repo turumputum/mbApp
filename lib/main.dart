@@ -350,11 +350,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               final Datagram? datagram = _mdnsSocket!.receive();
               if (datagram != null && datagram.data.isNotEmpty) {
                 _mdnsPacketCount++;
-                _log('mDNS: ===== Received packet #$_mdnsPacketCount =====');
-                _log('mDNS: From: ${datagram.address.address}:${datagram.port}');
-                _log('mDNS: Size: ${datagram.data.length} bytes');
+                // _log('mDNS: ===== Received packet #$_mdnsPacketCount =====');
+                // _log('mDNS: From: ${datagram.address.address}:${datagram.port}');
+                // _log('mDNS: Size: ${datagram.data.length} bytes');
                 
-                // Parse and log DNS packet details, then extract devices
+                // Parse DNS packet details, then extract devices
                 final Map<String, dynamic>? parsedData = _parseAndLogDnsPacket(datagram.data);
                 if (parsedData != null) {
                   _processMdnsDeviceData(parsedData);
@@ -461,22 +461,22 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final bool recursionAvailable = (flags & 0x0080) != 0;
       final int responseCode = flags & 0x000F;
       
-      _log('mDNS: DNS Header:');
-      _log('mDNS:   ID: 0x${id.toRadixString(16).padLeft(4, '0')}');
-      _log('mDNS:   Flags: 0x${flags.toRadixString(16).padLeft(4, '0')}');
-      _log('mDNS:   Type: ${isResponse ? "Response" : "Query"}');
-      if (isResponse) {
-        _log('mDNS:   Response Code: $responseCode');
-        _log('mDNS:   Authoritative: $isAuthoritative');
-        _log('mDNS:   Recursion Available: $recursionAvailable');
-      } else {
-        _log('mDNS:   Recursion Desired: $recursionDesired');
-      }
-      _log('mDNS:   Truncated: $isTruncated');
-      _log('mDNS:   Questions: $questions');
-      _log('mDNS:   Answer RRs: $answerRRs');
-      _log('mDNS:   Authority RRs: $authorityRRs');
-      _log('mDNS:   Additional RRs: $additionalRRs');
+      // _log('mDNS: DNS Header:');
+      // _log('mDNS:   ID: 0x${id.toRadixString(16).padLeft(4, '0')}');
+      // _log('mDNS:   Flags: 0x${flags.toRadixString(16).padLeft(4, '0')}');
+      // _log('mDNS:   Type: ${isResponse ? "Response" : "Query"}');
+      // if (isResponse) {
+      //   _log('mDNS:   Response Code: $responseCode');
+      //   _log('mDNS:   Authoritative: $isAuthoritative');
+      //   _log('mDNS:   Recursion Available: $recursionAvailable');
+      // } else {
+      //   _log('mDNS:   Recursion Desired: $recursionDesired');
+      // }
+      // _log('mDNS:   Truncated: $isTruncated');
+      // _log('mDNS:   Questions: $questions');
+      // _log('mDNS:   Answer RRs: $answerRRs');
+      // _log('mDNS:   Authority RRs: $authorityRRs');
+      // _log('mDNS:   Additional RRs: $additionalRRs');
       
       // Clear temporary storage
       _ptrRecords.clear();
@@ -488,7 +488,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       
       // Parse Questions
       if (questions > 0) {
-        _log('mDNS: Questions:');
+        // _log('mDNS: Questions:');
         for (int i = 0; i < questions && offset < data.length; i++) {
           final result = _parseDnsName(data, offset);
           final String qname = result[0] as String;
@@ -500,14 +500,14 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           final int qclass = (data[offset + 2] << 8) | data[offset + 3];
           offset += 4;
           
-          final String qtypeStr = _getDnsTypeName(qtype);
-          _log('mDNS:   [$i] QNAME: $qname, QTYPE: $qtypeStr ($qtype), QCLASS: $qclass');
+          // final String qtypeStr = _getDnsTypeName(qtype);
+          // _log('mDNS:   [$i] QNAME: $qname, QTYPE: $qtypeStr ($qtype), QCLASS: $qclass');
         }
       }
       
       // Parse Answer RRs
       if (answerRRs > 0) {
-        _log('mDNS: Answer Records:');
+        // _log('mDNS: Answer Records:');
         for (int i = 0; i < answerRRs && offset < data.length; i++) {
           final result = _parseDnsRecord(data, offset, 'Answer');
           if (result == null) break;
@@ -517,7 +517,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       
       // Parse Authority RRs
       if (authorityRRs > 0) {
-        _log('mDNS: Authority Records:');
+        // _log('mDNS: Authority Records:');
         for (int i = 0; i < authorityRRs && offset < data.length; i++) {
           final result = _parseDnsRecord(data, offset, 'Authority');
           if (result == null) break;
@@ -527,7 +527,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       
       // Parse Additional RRs
       if (additionalRRs > 0) {
-        _log('mDNS: Additional Records:');
+        // _log('mDNS: Additional Records:');
         for (int i = 0; i < additionalRRs && offset < data.length; i++) {
           final result = _parseDnsRecord(data, offset, 'Additional');
           if (result == null) break;
@@ -535,7 +535,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         }
       }
       
-      _log('mDNS: ===== End of packet #$_mdnsPacketCount =====');
+      // _log('mDNS: ===== End of packet #$_mdnsPacketCount =====');
       
       // Return parsed device data if found
       if (isResponse && answerRRs > 0) {
@@ -616,12 +616,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       
       if (currentOffset + rdlength > data.length) return null;
       
-      final String typeName = _getDnsTypeName(type);
-      final String classStr = rclass == 1 ? 'IN' : '0x${rclass.toRadixString(16)}';
+      // final String typeName = _getDnsTypeName(type);
+      // final String classStr = rclass == 1 ? 'IN' : '0x${rclass.toRadixString(16)}';
       
-      _log('mDNS:   [$section] NAME: $name');
-      _log('mDNS:      TYPE: $typeName ($type), CLASS: $classStr, TTL: $ttl');
-      _log('mDNS:      RDLENGTH: $rdlength bytes');
+      // _log('mDNS:   [$section] NAME: $name');
+      // _log('mDNS:      TYPE: $typeName ($type), CLASS: $classStr, TTL: $ttl');
+      // _log('mDNS:      RDLENGTH: $rdlength bytes');
       
       // Parse record data based on type
       final Uint8List rdata = data.sublist(currentOffset, currentOffset + rdlength);
@@ -630,7 +630,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         case 1: // A record
           if (rdlength == 4) {
             final String ip = '${rdata[0]}.${rdata[1]}.${rdata[2]}.${rdata[3]}';
-            _log('mDNS:      A: $ip');
+            // _log('mDNS:      A: $ip');
             _aRecords.add({
               'name': name,
               'ip': ip,
@@ -641,7 +641,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         case 12: // PTR record
           final ptrResult = _parseDnsName(data, currentOffset);
           final String ptrName = ptrResult[0] as String;
-          _log('mDNS:      PTR: $ptrName');
+          // _log('mDNS:      PTR: $ptrName');
           _ptrRecords.add({
             'name': name,
             'ptr': ptrName,
@@ -655,7 +655,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             final int port = (rdata[4] << 8) | rdata[5];
             final srvResult = _parseDnsName(data, currentOffset + 6);
             final String target = srvResult[0] as String;
-            _log('mDNS:      SRV: Priority=$priority, Weight=$weight, Port=$port, Target=$target');
+            // _log('mDNS:      SRV: Priority=$priority, Weight=$weight, Port=$port, Target=$target');
             _srvRecords.add({
               'name': name,
               'priority': priority,
@@ -668,7 +668,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           break;
         case 16: // TXT record
           final String txtData = _parseTxtRecord(rdata);
-          _log('mDNS:      TXT: $txtData');
+          // _log('mDNS:      TXT: $txtData');
           _txtRecords.add({
             'name': name,
             'txt': txtData,
@@ -676,7 +676,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           });
           break;
         default:
-          _log('mDNS:      DATA: ${rdata.take(32).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}${rdlength > 32 ? '...' : ''}');
+          // _log('mDNS:      DATA: ${rdata.take(32).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}${rdlength > 32 ? '...' : ''}');
+          break;
       }
       
       return {'offset': currentOffset + rdlength};
