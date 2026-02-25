@@ -771,8 +771,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       
       // QTYPE: PTR (12)
       packet.addAll([0x00, 0x0C]);
-      // QCLASS: IN (1) with unicast response flag (0x8001)
-      packet.addAll([0x80, 0x01]);
+      // QCLASS: IN (1) - multicast query (QM), not unicast (QU)
+      // Use 0x0001 for multicast query, not 0x8001 (which is unicast query)
+      packet.addAll([0x00, 0x01]);
       
       // Send to mDNS multicast address
       final InternetAddress multicastAddress = InternetAddress('224.0.0.251');
