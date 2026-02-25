@@ -1141,6 +1141,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           
           // Create one shared socket on anyIPv4:5353 for all interfaces (mdns-sd approach)
           RawDatagramSocket? sharedSocket;
+          StreamSubscription<RawSocketEvent>? sharedSubscription;
+          int totalPacketCount = 0;
+          
           try {
             _log('mDNS: Creating shared socket on anyIPv4:5353 for all interfaces (mdns-sd approach)...');
             sharedSocket = await RawDatagramSocket.bind(
@@ -1158,39 +1161,82 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               _log('mDNS: Failed to enable broadcast on shared socket: ${e.toString().split('\n').first}');
             }
             
+            // Set up ONE central listener for the shared socket (mdns-sd approach)
+            // This matches mdns-sd: one socket, one listener for all interfaces
+            _log('mDNS: Setting up central listener on shared socket (mdns-sd approach)...');
+            sharedSubscription = sharedSocket.listen(
+              (RawSocketEvent event) {
+                if (event == RawSocketEvent.read && sharedSocket != null) {
+                  try {
+                    final Datagram? datagram = sharedSocket.receive();
+                    if (datagram != null && datagram.data.isNotEmpty) {
+                      totalPacketCount++;
+                      _log('mDNS: [shared] Received packet #$totalPacketCount: ${datagram.data.length} bytes from ${datagram.address.address}:${datagram.port}');
+                      
+                      // Basic packet validation
+                      if (datagram.data.length >= 12) {
+                        final int flags = (datagram.data[2] << 8) | datagram.data[3];
+                        final bool isResponse = (flags & 0x8000) != 0;
+                        if (isResponse) {
+                          final int answerCount = (datagram.data[6] << 8) | datagram.data[7];
+                          _log('mDNS: [shared] DNS response with $answerCount answer record(s)');
+                          // TODO: Parse DNS packet to extract PTR, SRV, TXT, A records
+                        }
+                      }
+                    }
+                  } catch (e) {
+                    _log('mDNS: [shared] Error processing packet: ${e.toString().split('\n').first}');
+                  }
+                }
+              },
+              onError: (error) {
+                _log('mDNS: [shared] Socket error: $error');
+              },
+              cancelOnError: false,
+            );
+            
             // Give socket a moment to be ready
             await Future<void>.delayed(const Duration(milliseconds: 100));
-            _log('mDNS: Shared socket ready for receiving multicast responses');
+            _log('mDNS: Shared socket ready with central listener (mdns-sd approach)');
+            
+            // Scan all interfaces in parallel for each service type
+            for (final String serviceType in serviceTypes) {
+              _log('mDNS: Discovering $serviceType services...');
+              
+              // Send queries from all interfaces in parallel
+              // Use eagerError: false to continue even if one interface fails
+              await Future.wait(
+                interfaceList.map((entry) async {
+                  try {
+                    await _scanMdnsOnInterface(entry.address, entry.name, serviceType, uniqueDeviceIds, sharedSocket: sharedSocket);
+                  } catch (e) {
+                    // Error already logged in _scanMdnsOnInterface, just continue
+                    _log('mDNS: Skipping ${entry.name} due to error');
+                  }
+                }),
+                eagerError: false, // Continue even if one interface fails
+              );
+              
+              // Wait for responses after all queries are sent (mdns-sd approach)
+              _log('mDNS: All queries sent, waiting for responses on shared socket...');
+              await Future<void>.delayed(const Duration(seconds: 8));
+              _log('mDNS: Finished waiting for responses (received $totalPacketCount packet(s) total)');
+            }
           } catch (e) {
             _log('mDNS: Failed to create shared socket: ${e.toString().split('\n').first}');
             sharedSocket = null;
-          }
-          
-          // Scan all interfaces in parallel for each service type
-          for (final String serviceType in serviceTypes) {
-            _log('mDNS: Discovering $serviceType services...');
-            
-            // Use eagerError: false to continue even if one interface fails
-            await Future.wait(
-              interfaceList.map((entry) async {
-                try {
-                  await _scanMdnsOnInterface(entry.address, entry.name, serviceType, uniqueDeviceIds, sharedSocket: sharedSocket);
-                } catch (e) {
-                  // Error already logged in _scanMdnsOnInterface, just continue
-                  _log('mDNS: Skipping ${entry.name} due to error');
-                }
-              }),
-              eagerError: false, // Continue even if one interface fails
-            );
-          }
-          
-          // Close shared socket after all interfaces are done
-          if (sharedSocket != null) {
-            try {
-              sharedSocket.close();
-              _log('mDNS: Shared socket closed');
-            } catch (e) {
-              // Ignore close errors
+          } finally {
+            // Cancel subscription and close shared socket after all interfaces are done
+            if (sharedSubscription != null) {
+              await sharedSubscription.cancel();
+            }
+            if (sharedSocket != null) {
+              try {
+                sharedSocket.close();
+                _log('mDNS: Shared socket closed');
+              } catch (e) {
+                // Ignore close errors
+              }
             }
           }
         } catch (e) {
