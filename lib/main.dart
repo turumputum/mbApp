@@ -844,9 +844,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       }
       });  
 
+      bool clientStarted = false;
       try {
         _log('mDNS: Attempting to start client on $interfaceName (${interfaceAddress.address})...');
         await client.start();
+        clientStarted = true;
         _log('mDNS: Client started successfully on $interfaceName');
       } catch (e, stackTrace) {
         // Check if it's a protocol option error (common on VPN/virtual interfaces)
@@ -859,11 +861,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         if (errorStr.contains('10042') || errorStr.contains('getsockopt') || errorStr.contains('setsockopt')) {
           _log('mDNS: Error 10042 detected on $interfaceName - protocol option error');
           _log('mDNS: This may be caused by Windows multicast behavior or unsupported socket options');
-          _log('mDNS: Skipping $interfaceName - multicast not supported (VPN/virtual interface?)');
+          _log('mDNS: Will continue without client.start() - using query-only mode with manual receive');
+          clientStarted = false;
+          // Don't return - continue to send queries and receive manually
         } else {
           _log('mDNS: Failed to start on $interfaceName: ${errorStr.split('\n').first}');
+          return;
         }
-        return;
       }
       
       // Give a moment for initialization
@@ -907,6 +911,48 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       } catch (e, stackTrace) {
         _log('mDNS: Failed to send query on $interfaceName: ${e.toString().split('\n').first}');
         _log('mDNS: Query error stack trace: ${stackTrace.toString().split('\n').take(3).join('\n')}');
+      }
+      
+      // Only use client.lookup() if client started successfully
+      // If client.start() failed with 10042, we'll receive responses manually via querySocket
+      if (!clientStarted) {
+        _log('mDNS: Client not started, will receive responses manually on $interfaceName');
+        _log('mDNS: Query sent from port ${querySocket?.port ?? "unknown"}, listening for responses...');
+        
+        // Try to receive responses manually via querySocket
+        final Duration waitTimeout = const Duration(seconds: 8);
+        final DateTime endTime = DateTime.now().add(waitTimeout);
+        int packetCount = 0;
+        
+        while (DateTime.now().isBefore(endTime) && querySocket != null) {
+          try {
+            final Datagram? datagram = querySocket.receive();
+            if (datagram != null && datagram.data.isNotEmpty) {
+              packetCount++;
+              _log('mDNS: Received packet #$packetCount on $interfaceName: ${datagram.data.length} bytes from ${datagram.address.address}:${datagram.port}');
+              
+              // Basic packet validation
+              if (datagram.data.length >= 12) {
+                final int flags = (datagram.data[2] << 8) | datagram.data[3];
+                final bool isResponse = (flags & 0x8000) != 0;
+                if (isResponse) {
+                  final int answerCount = (datagram.data[6] << 8) | datagram.data[7];
+                  _log('mDNS: DNS response with $answerCount answer record(s)');
+                }
+              }
+            } else {
+              await Future<void>.delayed(const Duration(milliseconds: 50));
+            }
+          } catch (e) {
+            if (e is! TimeoutException) {
+              _log('mDNS: Error receiving packet on $interfaceName: ${e.toString().split('\n').first}');
+            }
+            await Future<void>.delayed(const Duration(milliseconds: 50));
+          }
+        }
+        
+        _log('mDNS: Finished waiting for responses on $interfaceName (received $packetCount packet(s))');
+        return;
       }
       
       // Query for the specific service type with timeout
