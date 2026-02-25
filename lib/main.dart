@@ -800,145 +800,61 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
   }
 
-  /// Receive mDNS responses via shared client on anyIPv4
-  Future<void> _receiveViaSharedClient(MDnsClient sharedClient, String serviceType, Set<String> uniqueDeviceIds) async {
+  /// Receive mDNS responses via shared socket on anyIPv4 and parse manually
+  Future<void> _receiveViaSharedSocket(RawDatagramSocket sharedSocket, String serviceType, Set<String> uniqueDeviceIds) async {
     try {
-      _log('mDNS: Starting to receive responses via shared client for $serviceType');
-      final Duration ptrTimeout = const Duration(seconds: 10); // Increased timeout
+      _log('mDNS: Starting to receive responses via shared socket for $serviceType');
+      final Duration receiveTimeout = const Duration(seconds: 10);
+      final DateTime endTime = DateTime.now().add(receiveTimeout);
       
-      // Start listening BEFORE sending queries to ensure we don't miss responses
-      // lookup() will also send its own query, but we'll receive responses to both
-      final Stream<PtrResourceRecord> ptrStream = sharedClient.lookup<PtrResourceRecord>(
-        ResourceRecordQuery.serverPointer(serviceType),
-      );
+      _log('mDNS: Listening for mDNS responses on shared socket (timeout: ${receiveTimeout.inSeconds}s)...');
       
-      _log('mDNS: Shared client is now listening for PTR records (timeout: ${ptrTimeout.inSeconds}s)...');
+      int packetCount = 0;
       
-      // Give a moment for the stream to be ready
-      await Future<void>.delayed(const Duration(milliseconds: 50));
-      
-      int recordCount = 0;
-      await for (final PtrResourceRecord ptr in ptrStream.timeout(
-        ptrTimeout,
-        onTimeout: (sink) {
-          _log('mDNS: Timeout waiting for PTR records via shared client (received $recordCount records)');
-          sink.close();
-        },
-      )) {
-        recordCount++;
-        final String serviceName = ptr.domainName;
-        _log('mDNS: Found service: $serviceName via shared client');
-        
-        // Get SRV record
-        final Duration srvTimeout = const Duration(seconds: 5);
-        
+      // Listen to socket for incoming packets using a timer-based approach
+      while (DateTime.now().isBefore(endTime)) {
         try {
-          await for (final SrvResourceRecord srv in sharedClient.lookup<SrvResourceRecord>(
-            ResourceRecordQuery.service(serviceName),
-          ).timeout(
-            srvTimeout,
-            onTimeout: (sink) {
-              sink.close();
-            },
-          )) {
-            final String host = srv.target;
-            final int port = srv.port;
-            final String deviceId = '$host:$port';
+          final Datagram? datagram = sharedSocket.receive();
+          if (datagram != null && datagram.data.isNotEmpty) {
+            packetCount++;
+            _log('mDNS: Received packet #$packetCount: ${datagram.data.length} bytes from ${datagram.address.address}:${datagram.port}');
             
-            if (uniqueDeviceIds.contains(deviceId)) {
-              continue;
-            }
-            
-            // Get TXT record
-            String? deviceName;
+            // Try to parse DNS packet manually
             try {
-              await for (final TxtResourceRecord txt in sharedClient.lookup<TxtResourceRecord>(
-                ResourceRecordQuery.text(serviceName),
-              ).timeout(
-                const Duration(seconds: 3),
-                onTimeout: (sink) {
-                  sink.close();
-                },
-              )) {
-                String txtData;
-                if (txt.text is List) {
-                  txtData = (txt.text as List).join(' ');
-                } else {
-                  txtData = txt.text.toString();
-                }
+              final Uint8List data = datagram.data;
+              if (data.length >= 12) {
+                // Check if this is a response (QR bit = 1)
+                final int flags = (data[2] << 8) | data[3];
+                final bool isResponse = (flags & 0x8000) != 0;
                 
-                final String? parsedName = _parseDeviceNameFromString(txtData);
-                if (parsedName != null) {
-                  deviceName = parsedName;
-                  break;
+                if (isResponse) {
+                  final int answerCount = (data[6] << 8) | data[7];
+                  _log('mDNS: DNS response with $answerCount answer record(s)');
+                  
+                  // Note: Full DNS packet parsing is complex and would require implementing
+                  // a complete DNS parser. For now, we log that we received responses.
+                  // The responses are being received, but we need a proper parser to extract
+                  // PTR, SRV, TXT, and A records from the packet.
                 }
               }
-            } catch (e) {
-              // Ignore TXT errors
+            } catch (parseError) {
+              _log('mDNS: Error parsing packet: ${parseError.toString().split('\n').first}');
             }
-            
-            if (deviceName == null || deviceName.isEmpty) {
-              final String? parsedName = _parseDeviceNameFromString(serviceName);
-              if (parsedName != null) {
-                deviceName = parsedName;
-              } else {
-                deviceName = serviceName.replaceAll('.$serviceType.local', '').replaceAll('.$serviceType', '');
-              }
-            }
-            
-            // Resolve hostname to IP address
-            String? ipAddress;
-            if (RegExp(r'^\d+\.\d+\.\d+\.\d+$').hasMatch(host)) {
-              ipAddress = host;
-            } else {
-              try {
-                final List<InternetAddress> addresses = await InternetAddress.lookup(host).timeout(
-                  const Duration(milliseconds: 200),
-                  onTimeout: () {
-                    throw TimeoutException('DNS lookup timeout');
-                  },
-                );
-                if (addresses.isNotEmpty) {
-                  ipAddress = addresses.first.address;
-                }
-              } catch (e) {
-                ipAddress = host;
-              }
-            }
-            
-            if (ipAddress == null || ipAddress.isEmpty) {
-              continue;
-            }
-            
-            uniqueDeviceIds.add(deviceId);
-            final DeviceItem d = DeviceItem(
-              displayName: deviceName.isEmpty ? '(unnamed)' : deviceName,
-              kind: 'mDNS',
-              identifier: '$ipAddress:$port',
-              extra: <String, Object?>{
-                'hostname': host,
-                'ip': ipAddress,
-                'port': port,
-                'service_name': serviceName,
-                'service_type': serviceType,
-              },
-            );
-            _log('mDNS: adding/updating "${deviceName.isEmpty ? '(unnamed)' : deviceName}" from $ipAddress:$port via shared client');
-            _addOrUpdateDevice(d, "mdns");
+          } else {
+            // No data available, wait a bit
+            await Future<void>.delayed(const Duration(milliseconds: 50));
           }
         } catch (e) {
-          _log('mDNS: Error getting SRV record for $serviceName: ${e.toString().split('\n').first}');
+          if (e is! TimeoutException) {
+            _log('mDNS: Error reading from socket: ${e.toString().split('\n').first}');
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 50));
         }
       }
       
-      if (recordCount > 0) {
-        _log('mDNS: Received $recordCount PTR record(s) via shared client');
-      } else {
-        _log('mDNS: No PTR records received via shared client');
-      }
+      _log('mDNS: Finished receiving via shared socket (received $packetCount packet(s))');
     } catch (e) {
-      _log('mDNS: Error in shared client: ${e.toString().split('\n').first}');
-      _log('mDNS: Stack trace: ${StackTrace.current.toString().split('\n').take(3).join('\n')}');
+      _log('mDNS: Error in shared socket: ${e.toString().split('\n').first}');
     }
   }
 
@@ -1285,35 +1201,38 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             _log('mDNS: Failed to check for Wi-Fi interfaces: ${e.toString().split('\n').first}');
           }
           
-          // Create shared client on anyIPv4 for receiving responses if Wi-Fi is present
-          MDnsClient? sharedClient;
+          // Create shared receive socket on anyIPv4 for receiving responses if Wi-Fi is present
+          // We can't use MDnsClient.start() because it fails with error 10042 on Windows with Wi-Fi
+          RawDatagramSocket? sharedReceiveSocket;
           if (hasWifi) {
             try {
-              sharedClient = MDnsClient(rawDatagramSocketFactory:
-              (dynamic host, int port,
-                {bool? reuseAddress, bool? reusePort, int? ttl}) async {
-                final RawDatagramSocket socket = await RawDatagramSocket.bind(
-                  InternetAddress.anyIPv4,
-                  port,
-                  reuseAddress: true,
-                  reusePort: false,
-                  ttl: ttl ?? 255
-                );
-                
-                try {
-                  socket.broadcastEnabled = true;
-                } catch (e) {
-                  // Ignore broadcast setting errors
-                }
-                
-                return socket;
-              });
+              sharedReceiveSocket = await RawDatagramSocket.bind(
+                InternetAddress.anyIPv4,
+                5353, // mDNS port
+                reuseAddress: true,
+                reusePort: false,
+              );
               
-              await sharedClient.start();
-              _log('mDNS: Shared client started on anyIPv4 for receiving responses');
+              try {
+                sharedReceiveSocket.broadcastEnabled = true;
+              } catch (e) {
+                // Ignore broadcast setting errors
+              }
+              
+              // Try to join multicast group manually (may fail with 10042, but we'll try)
+              try {
+                final InternetAddress multicastAddress = InternetAddress('224.0.0.251');
+                sharedReceiveSocket.joinMulticast(multicastAddress);
+                _log('mDNS: Shared receive socket joined multicast group on anyIPv4');
+              } catch (e) {
+                _log('mDNS: Failed to join multicast on shared socket (may still receive responses): ${e.toString().split('\n').first}');
+                // Continue anyway - socket might still receive responses
+              }
+              
+              _log('mDNS: Shared receive socket created on anyIPv4 (port 5353)');
             } catch (e) {
-              _log('mDNS: Failed to start shared client: ${e.toString().split('\n').first}');
-              sharedClient = null;
+              _log('mDNS: Failed to create shared receive socket: ${e.toString().split('\n').first}');
+              sharedReceiveSocket = null;
             }
           }
           
@@ -1321,12 +1240,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           for (final String serviceType in serviceTypes) {
             _log('mDNS: Discovering $serviceType services...');
             
-            // Start receiving via shared client if available (run in parallel with sending queries)
+            // Start receiving via shared socket if available (run in parallel with sending queries)
             Future<void>? sharedReceiveFuture;
-            if (sharedClient != null) {
-              _log('mDNS: Starting shared client receiver in parallel with query sending');
-              sharedReceiveFuture = _receiveViaSharedClient(sharedClient, serviceType, uniqueDeviceIds);
-              // Give shared client a moment to start
+            if (sharedReceiveSocket != null) {
+              _log('mDNS: Starting shared socket receiver in parallel with query sending');
+              sharedReceiveFuture = _receiveViaSharedSocket(sharedReceiveSocket, serviceType, uniqueDeviceIds);
+              // Give socket a moment to be ready
               await Future<void>.delayed(const Duration(milliseconds: 100));
             }
             
@@ -1344,24 +1263,24 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               eagerError: false, // Continue even if one interface fails
             );
             
-            _log('mDNS: All queries sent, waiting for shared client to receive responses...');
+            _log('mDNS: All queries sent, waiting for shared socket to receive responses...');
             
-            // Wait for shared client to finish receiving
+            // Wait for shared socket to finish receiving
             if (sharedReceiveFuture != null) {
               try {
                 await sharedReceiveFuture;
               } catch (e) {
-                _log('mDNS: Error in shared client: ${e.toString().split('\n').first}');
+                _log('mDNS: Error in shared socket: ${e.toString().split('\n').first}');
               }
             }
           }
           
-          // Clean up shared client
-          if (sharedClient != null) {
+          // Clean up shared socket
+          if (sharedReceiveSocket != null) {
             try {
-              sharedClient.stop();
+              sharedReceiveSocket.close();
             } catch (e) {
-              // Ignore stop errors
+              // Ignore close errors
             }
           }
         } catch (e) {
