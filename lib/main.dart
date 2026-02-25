@@ -807,7 +807,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
   /// Scan mDNS on a single interface (for Windows parallel scanning)
-  Future<void> _scanMdnsOnInterface(InternetAddress interfaceAddress, String interfaceName, String serviceType, Set<String> uniqueDeviceIds) async {
+  /// On Windows, if sharedSocket is provided, use it for sending queries (mdns-sd approach)
+  Future<void> _scanMdnsOnInterface(InternetAddress interfaceAddress, String interfaceName, String serviceType, Set<String> uniqueDeviceIds, {RawDatagramSocket? sharedSocket}) async {
     MDnsClient? client;
     RawDatagramSocket? querySocket;
     
@@ -925,21 +926,22 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       if (!clientStarted) {
         _log('mDNS: Client not started, will receive responses manually on $interfaceName');
         
-        // Use querySocket (anyIPv4:5353) for receiving - mdns-sd approach
+        // Use sharedSocket or querySocket for receiving - mdns-sd approach
         // On Windows, socket on INADDR_ANY can receive multicast without joinMulticast
-        if (querySocket != null) {
+        final RawDatagramSocket? receiveSocket = sharedSocket ?? querySocket;
+        if (receiveSocket != null) {
           final Duration waitTimeout = const Duration(seconds: 8);
           int packetCount = 0;
           
           _log('mDNS: Query sent, listening for responses on anyIPv4:5353 socket (mdns-sd approach)...');
-          _log('mDNS: Using single socket on INADDR_ANY for both sending and receiving (mdns-sd approach)');
+          _log('mDNS: Using ${sharedSocket != null ? "shared" : "interface"} socket on INADDR_ANY for receiving (mdns-sd approach)');
           
-          // Listen to querySocket events asynchronously
-          final StreamSubscription<RawSocketEvent>? querySubscription = querySocket.listen(
+          // Listen to receiveSocket events asynchronously
+          final StreamSubscription<RawSocketEvent>? querySubscription = receiveSocket.listen(
             (RawSocketEvent event) {
-              if (event == RawSocketEvent.read && querySocket != null) {
+              if (event == RawSocketEvent.read) {
                 try {
-                  final Datagram? datagram = querySocket.receive();
+                  final Datagram? datagram = receiveSocket.receive();
                   if (datagram != null && datagram.data.isNotEmpty) {
                     packetCount++;
                     _log('mDNS: Received packet #$packetCount: ${datagram.data.length} bytes from ${datagram.address.address}:${datagram.port}');
@@ -970,12 +972,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           _log('mDNS: Waiting ${waitTimeout.inSeconds} seconds for responses...');
           await Future<void>.delayed(waitTimeout);
           
-          // Cancel subscription and close socket
+          // Cancel subscription (but don't close shared socket - it's used by other interfaces)
           await querySubscription?.cancel();
-          try {
-            querySocket.close();
-          } catch (e) {
-            // Ignore close errors
+          if (querySocket != null && sharedSocket == null) {
+            // Only close if it's not a shared socket
+            try {
+              querySocket.close();
+            } catch (e) {
+              // Ignore close errors
+            }
           }
           
           _log('mDNS: Finished waiting for responses on $interfaceName (received $packetCount packet(s))');
@@ -1159,6 +1164,33 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           
           _log('mDNS: Scanning on ${interfaceList.length} interface(s) in parallel');
           
+          // Create one shared socket on anyIPv4:5353 for all interfaces (mdns-sd approach)
+          RawDatagramSocket? sharedSocket;
+          try {
+            _log('mDNS: Creating shared socket on anyIPv4:5353 for all interfaces (mdns-sd approach)...');
+            sharedSocket = await RawDatagramSocket.bind(
+              InternetAddress.anyIPv4,
+              5353,
+              reuseAddress: true,
+              reusePort: Platform.isWindows ? false : true,
+            );
+            _log('mDNS: Shared socket bound to anyIPv4:5353, port: ${sharedSocket.port}');
+            
+            try {
+              sharedSocket.broadcastEnabled = true;
+              _log('mDNS: Broadcast enabled on shared socket');
+            } catch (e) {
+              _log('mDNS: Failed to enable broadcast on shared socket: ${e.toString().split('\n').first}');
+            }
+            
+            // Give socket a moment to be ready
+            await Future<void>.delayed(const Duration(milliseconds: 100));
+            _log('mDNS: Shared socket ready for receiving multicast responses');
+          } catch (e) {
+            _log('mDNS: Failed to create shared socket: ${e.toString().split('\n').first}');
+            sharedSocket = null;
+          }
+          
           // Scan all interfaces in parallel for each service type
           for (final String serviceType in serviceTypes) {
             _log('mDNS: Discovering $serviceType services...');
@@ -1167,7 +1199,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             await Future.wait(
               interfaceList.map((entry) async {
                 try {
-                  await _scanMdnsOnInterface(entry.address, entry.name, serviceType, uniqueDeviceIds);
+                  await _scanMdnsOnInterface(entry.address, entry.name, serviceType, uniqueDeviceIds, sharedSocket: sharedSocket);
                 } catch (e) {
                   // Error already logged in _scanMdnsOnInterface, just continue
                   _log('mDNS: Skipping ${entry.name} due to error');
@@ -1175,6 +1207,16 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               }),
               eagerError: false, // Continue even if one interface fails
             );
+          }
+          
+          // Close shared socket after all interfaces are done
+          if (sharedSocket != null) {
+            try {
+              sharedSocket.close();
+              _log('mDNS: Shared socket closed');
+            } catch (e) {
+              // Ignore close errors
+            }
           }
         } catch (e) {
           _log('mDNS: Failed to get interfaces: ${e.toString().split('\n').first}');
