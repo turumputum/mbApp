@@ -800,120 +800,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
   }
 
-  /// Receive mDNS responses via shared socket on anyIPv4 and parse manually
-  Future<void> _receiveViaSharedSocket(RawDatagramSocket sharedSocket, String serviceType, Set<String> uniqueDeviceIds) async {
-    try {
-      _log('mDNS: Starting to receive responses via shared socket for $serviceType');
-      final Duration receiveTimeout = const Duration(seconds: 10);
-      final DateTime endTime = DateTime.now().add(receiveTimeout);
-      
-      _log('mDNS: Listening for mDNS responses on shared socket (timeout: ${receiveTimeout.inSeconds}s)...');
-      
-      int packetCount = 0;
-      
-      // Listen to socket for incoming packets using a timer-based approach
-      while (DateTime.now().isBefore(endTime)) {
-        try {
-          final Datagram? datagram = sharedSocket.receive();
-          if (datagram != null && datagram.data.isNotEmpty) {
-            packetCount++;
-            _log('mDNS: Received packet #$packetCount: ${datagram.data.length} bytes from ${datagram.address.address}:${datagram.port}');
-            
-            // Try to parse DNS packet manually
-            try {
-              final Uint8List data = datagram.data;
-              if (data.length >= 12) {
-                // Check if this is a response (QR bit = 1)
-                final int flags = (data[2] << 8) | data[3];
-                final bool isResponse = (flags & 0x8000) != 0;
-                
-                if (isResponse) {
-                  final int answerCount = (data[6] << 8) | data[7];
-                  _log('mDNS: DNS response with $answerCount answer record(s)');
-                  
-                  // Note: Full DNS packet parsing is complex and would require implementing
-                  // a complete DNS parser. For now, we log that we received responses.
-                  // The responses are being received, but we need a proper parser to extract
-                  // PTR, SRV, TXT, and A records from the packet.
-                }
-              }
-            } catch (parseError) {
-              _log('mDNS: Error parsing packet: ${parseError.toString().split('\n').first}');
-            }
-          } else {
-            // No data available, wait a bit
-            await Future<void>.delayed(const Duration(milliseconds: 50));
-          }
-        } catch (e) {
-          if (e is! TimeoutException) {
-            _log('mDNS: Error reading from socket: ${e.toString().split('\n').first}');
-          }
-          await Future<void>.delayed(const Duration(milliseconds: 50));
-        }
-      }
-      
-      _log('mDNS: Finished receiving via shared socket (received $packetCount packet(s))');
-    } catch (e) {
-      _log('mDNS: Error in shared socket: ${e.toString().split('\n').first}');
-    }
-  }
-
   /// Scan mDNS on a single interface (for Windows parallel scanning)
-  Future<void> _scanMdnsOnInterface(InternetAddress interfaceAddress, String interfaceName, String serviceType, Set<String> uniqueDeviceIds, {bool hasWifi = false}) async {
+  Future<void> _scanMdnsOnInterface(InternetAddress interfaceAddress, String interfaceName, String serviceType, Set<String> uniqueDeviceIds) async {
     MDnsClient? client;
     RawDatagramSocket? querySocket;
     
-    // On Windows with Wi-Fi, MDnsClient.start() will fail with error 10042
-    // Skip client creation and use query-only mode with shared receiver
-    if (hasWifi && Platform.isWindows) {
-      _log('mDNS: Wi-Fi detected, skipping client.start() for $interfaceName to avoid error 10042');
-      // Send queries from port 5353 (same as receive port) to ensure responses come to the right place
-      // Use reusePort: true to allow multiple sockets on the same port
-      try {
-        try {
-          querySocket = await RawDatagramSocket.bind(
-            interfaceAddress,
-            5353, // Use mDNS port for sending too
-            reuseAddress: true,
-            reusePort: true, // Allow multiple sockets on same port
-          );
-          _log('mDNS: Query socket bound to port 5353 with reusePort: true on $interfaceName');
-        } catch (e) {
-          // If reusePort fails, try without it
-          _log('mDNS: Failed with reusePort: true, trying without: ${e.toString().split('\n').first}');
-          querySocket = await RawDatagramSocket.bind(
-            interfaceAddress,
-            5353,
-            reuseAddress: true,
-            reusePort: false,
-          );
-          _log('mDNS: Query socket bound to port 5353 without reusePort on $interfaceName');
-        }
-        
-        querySocket.broadcastEnabled = true;
-        
-        // Send query manually
-        await _sendMdnsQuery(querySocket, serviceType, interfaceAddress: interfaceAddress);
-        _log('mDNS: Query sent on $interfaceName from port ${querySocket.port}, responses will be received via shared socket');
-        
-        // Wait a bit for responses (shared socket will handle receiving)
-        await Future<void>.delayed(const Duration(seconds: 8));
-      } catch (e) {
-        _log('mDNS: Failed to send query on $interfaceName: ${e.toString().split('\n').first}');
-      } finally {
-        if (querySocket != null) {
-          try {
-            querySocket.close();
-          } catch (e) {
-            // Ignore close errors
-          }
-        }
-      }
-      return; // Skip client-based receiving
-    }
-    
     try {
-      // Create client bound to this specific interface (normal case, no Wi-Fi)
+      // Create client bound to this specific interface
       client = MDnsClient(rawDatagramSocketFactory:
       (dynamic host, int port,
         {bool? reuseAddress, bool? reusePort, int? ttl}) async {
@@ -922,7 +815,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           interfaceAddress, 
           port,
           reuseAddress: true, 
-          reusePort: false, 
+          reusePort: true, 
           ttl: ttl ?? 255
         );
         
@@ -940,48 +833,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       });  
 
       try {
-        _log('mDNS: Attempting to start client on $interfaceName (${interfaceAddress.address})...');
         await client.start();
-        _log('mDNS: Client started successfully on $interfaceName');
-      } catch (e, stackTrace) {
+      } catch (e) {
         // Check if it's a protocol option error (common on VPN/virtual interfaces)
         final String errorStr = e.toString();
-        final String stackStr = stackTrace.toString();
-        
-        // Log full error details for debugging
-        _log('mDNS: Error starting client on $interfaceName: $errorStr');
-        _log('mDNS: Stack trace: ${stackStr.split('\n').take(5).join('\n')}');
-        
         if (errorStr.contains('10042') || errorStr.contains('getsockopt') || errorStr.contains('setsockopt')) {
-          _log('mDNS: Error 10042 detected on $interfaceName - checking if Wi-Fi interface exists...');
-          
-          // Check if Wi-Fi interface exists in system
-          try {
-            final List<NetworkInterface> allInterfaces = await NetworkInterface.list(
-              includeLinkLocal: true,
-              type: InternetAddressType.IPv4,
-            );
-            
-            final bool hasWifi = allInterfaces.any((iface) {
-              final name = iface.name.toLowerCase();
-              return name.contains('wireless') || 
-                     name.contains('wifi') || 
-                     name.contains('wi-fi') ||
-                     name.contains('беспроводная') ||
-                     name.contains('802.11');
-            });
-            
-            if (hasWifi) {
-              _log('mDNS: Wi-Fi interface detected in system - this may be causing error 10042 on $interfaceName');
-              _log('mDNS: Error 10042 likely caused by Windows multicast behavior when Wi-Fi interface is present');
-            } else {
-              _log('mDNS: No Wi-Fi interface detected - error 10042 may be due to other reasons');
-            }
-          } catch (checkError) {
-            _log('mDNS: Failed to check for Wi-Fi interface: ${checkError.toString().split('\n').first}');
-          }
-          
-          _log('mDNS: Skipping $interfaceName due to error 10042');
+          _log('mDNS: Skipping $interfaceName - multicast not supported (VPN/virtual interface?)');
         } else {
           _log('mDNS: Failed to start on $interfaceName: ${errorStr.split('\n').first}');
         }
@@ -996,6 +853,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
         querySocket = await RawDatagramSocket.bind(
           interfaceAddress,
           0,
+          reuseAddress: true,
+          reusePort: true,
         );
         querySocket.broadcastEnabled = true;
         
@@ -1179,120 +1038,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           
           _log('mDNS: Scanning on ${interfaceList.length} interface(s) in parallel');
           
-          // Log interface details for debugging
-          for (final entry in interfaceList) {
-            _log('mDNS: Interface: ${entry.name} -> ${entry.address.address}');
-          }
-          
-          // Check if Wi-Fi interface exists (even if not in our list)
-          bool hasWifi = false;
-          try {
-            final List<NetworkInterface> allInterfaces = await NetworkInterface.list(
-              includeLinkLocal: true,
-              type: InternetAddressType.IPv4,
-            );
-            
-            final List<NetworkInterface> wifiInterfaces = allInterfaces.where((iface) {
-              final name = iface.name.toLowerCase();
-              return name.contains('wireless') || 
-                     name.contains('wifi') || 
-                     name.contains('wi-fi') ||
-                     name.contains('беспроводная') ||
-                     name.contains('802.11');
-            }).toList();
-            
-            if (wifiInterfaces.isNotEmpty) {
-              hasWifi = true;
-              _log('mDNS: Wi-Fi interface(s) detected in system: ${wifiInterfaces.map((i) => i.name).join(', ')}');
-              for (final wifiIface in wifiInterfaces) {
-                _log('mDNS:   Wi-Fi interface "${wifiIface.name}" has ${wifiIface.addresses.length} address(es)');
-                for (final addr in wifiIface.addresses) {
-                  _log('mDNS:     - ${addr.address} (loopback: ${addr.isLoopback}, linkLocal: ${addr.isLinkLocal})');
-                }
-              }
-              _log('mDNS: Will use shared client on anyIPv4 for receiving responses due to Wi-Fi presence');
-            } else {
-              _log('mDNS: No Wi-Fi interfaces detected in system');
-            }
-          } catch (e) {
-            _log('mDNS: Failed to check for Wi-Fi interfaces: ${e.toString().split('\n').first}');
-          }
-          
-          // Create shared receive socket on anyIPv4 for receiving responses if Wi-Fi is present
-          // We can't use MDnsClient.start() because it fails with error 10042 on Windows with Wi-Fi
-          // Try with reusePort: true first - this may help avoid error 10042
-          RawDatagramSocket? sharedReceiveSocket;
-          if (hasWifi) {
-            try {
-              // First try with reusePort: true - this may help on Windows
-              try {
-                sharedReceiveSocket = await RawDatagramSocket.bind(
-                  InternetAddress.anyIPv4,
-                  5353, // mDNS port
-                  reuseAddress: true,
-                  reusePort: true, // Try reusePort: true to avoid conflicts
-                );
-                _log('mDNS: Shared receive socket created with reusePort: true');
-              } catch (e) {
-                // If that fails, try without reusePort
-                _log('mDNS: Failed with reusePort: true, trying without: ${e.toString().split('\n').first}');
-                sharedReceiveSocket = await RawDatagramSocket.bind(
-                  InternetAddress.anyIPv4,
-                  5353,
-                  reuseAddress: true,
-                  reusePort: false,
-                );
-                _log('mDNS: Shared receive socket created with reusePort: false');
-              }
-              
-              try {
-                sharedReceiveSocket.broadcastEnabled = true;
-              } catch (e) {
-                // Ignore broadcast setting errors
-              }
-              
-              // Try to join multicast group manually (may fail with 10042, but we'll try)
-              try {
-                final InternetAddress multicastAddress = InternetAddress('224.0.0.251');
-                sharedReceiveSocket.joinMulticast(multicastAddress);
-                _log('mDNS: Shared receive socket joined multicast group on anyIPv4');
-              } catch (e) {
-                final String errorStr = e.toString();
-                if (errorStr.contains('10042')) {
-                  _log('mDNS: joinMulticast failed with 10042 (expected on Windows with Wi-Fi), continuing without multicast join');
-                  _log('mDNS: Socket may still receive unicast responses');
-                } else {
-                  _log('mDNS: Failed to join multicast on shared socket: ${errorStr.split('\n').first}');
-                }
-                // Continue anyway - socket might still receive responses
-              }
-              
-              _log('mDNS: Shared receive socket ready on anyIPv4 (port 5353)');
-            } catch (e) {
-              _log('mDNS: Failed to create shared receive socket: ${e.toString().split('\n').first}');
-              sharedReceiveSocket = null;
-            }
-          }
-          
           // Scan all interfaces in parallel for each service type
           for (final String serviceType in serviceTypes) {
             _log('mDNS: Discovering $serviceType services...');
             
-            // Start receiving via shared socket if available (run in parallel with sending queries)
-            Future<void>? sharedReceiveFuture;
-            if (sharedReceiveSocket != null) {
-              _log('mDNS: Starting shared socket receiver in parallel with query sending');
-              sharedReceiveFuture = _receiveViaSharedSocket(sharedReceiveSocket, serviceType, uniqueDeviceIds);
-              // Give socket a moment to be ready
-              await Future<void>.delayed(const Duration(milliseconds: 100));
-            }
-            
-            // Send queries on all interfaces in parallel
-            _log('mDNS: Sending queries on ${interfaceList.length} interface(s)...');
+            // Use eagerError: false to continue even if one interface fails
             await Future.wait(
               interfaceList.map((entry) async {
                 try {
-                  await _scanMdnsOnInterface(entry.address, entry.name, serviceType, uniqueDeviceIds, hasWifi: hasWifi);
+                  await _scanMdnsOnInterface(entry.address, entry.name, serviceType, uniqueDeviceIds);
                 } catch (e) {
                   // Error already logged in _scanMdnsOnInterface, just continue
                   _log('mDNS: Skipping ${entry.name} due to error');
@@ -1300,26 +1054,6 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               }),
               eagerError: false, // Continue even if one interface fails
             );
-            
-            _log('mDNS: All queries sent, waiting for shared socket to receive responses...');
-            
-            // Wait for shared socket to finish receiving
-            if (sharedReceiveFuture != null) {
-              try {
-                await sharedReceiveFuture;
-              } catch (e) {
-                _log('mDNS: Error in shared socket: ${e.toString().split('\n').first}');
-              }
-            }
-          }
-          
-          // Clean up shared socket
-          if (sharedReceiveSocket != null) {
-            try {
-              sharedReceiveSocket.close();
-            } catch (e) {
-              // Ignore close errors
-            }
           }
         } catch (e) {
           _log('mDNS: Failed to get interfaces: ${e.toString().split('\n').first}');
