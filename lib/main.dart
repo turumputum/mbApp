@@ -807,17 +807,53 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     
     try {
       // Create client bound to this specific interface
+      // On Windows, if Wi-Fi interface exists, binding to specific interface may cause error 10042
+      // Try binding to anyIPv4 first, then fall back to specific interface if that fails
       client = MDnsClient(rawDatagramSocketFactory:
       (dynamic host, int port,
         {bool? reuseAddress, bool? reusePort, int? ttl}) async {
       try {
-        final RawDatagramSocket socket = await RawDatagramSocket.bind(
-          interfaceAddress, 
-          port,
-          reuseAddress: true, 
-          reusePort: false, 
-          ttl: ttl ?? 255
-        );
+        RawDatagramSocket socket;
+        
+        // Check if Wi-Fi interface exists - if so, use anyIPv4 to avoid error 10042
+        bool hasWifi = false;
+        try {
+          final List<NetworkInterface> allInterfaces = await NetworkInterface.list(
+            includeLinkLocal: true,
+            type: InternetAddressType.IPv4,
+          );
+          hasWifi = allInterfaces.any((iface) {
+            final name = iface.name.toLowerCase();
+            return name.contains('wireless') || 
+                   name.contains('wifi') || 
+                   name.contains('wi-fi') ||
+                   name.contains('беспроводная') ||
+                   name.contains('802.11');
+          });
+        } catch (e) {
+          // Ignore check errors
+        }
+        
+        if (hasWifi && Platform.isWindows) {
+          // On Windows with Wi-Fi, bind to anyIPv4 to avoid multicast join issues
+          _log('mDNS: Wi-Fi detected, binding to anyIPv4 instead of ${interfaceAddress.address} for $interfaceName');
+          socket = await RawDatagramSocket.bind(
+            InternetAddress.anyIPv4, 
+            port,
+            reuseAddress: true, 
+            reusePort: false, 
+            ttl: ttl ?? 255
+          );
+        } else {
+          // Normal case: bind to specific interface
+          socket = await RawDatagramSocket.bind(
+            interfaceAddress, 
+            port,
+            reuseAddress: true, 
+            reusePort: false, 
+            ttl: ttl ?? 255
+          );
+        }
         
         try {
           socket.broadcastEnabled = true;
