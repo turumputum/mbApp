@@ -873,49 +873,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       // Give a moment for initialization
       await Future<void>.delayed(const Duration(milliseconds: 100));
       
-      // If client didn't start, create receive socket BEFORE sending query
-      RawDatagramSocket? receiveSocket;
-      if (!clientStarted) {
-        try {
-          _log('mDNS: Creating receive socket on anyIPv4:5353 BEFORE sending query...');
-          receiveSocket = await RawDatagramSocket.bind(
-            InternetAddress.anyIPv4,
-            5353,
-            reuseAddress: true,
-            reusePort: Platform.isWindows ? false : true,
-          );
-          _log('mDNS: Receive socket created on anyIPv4:5353, port: ${receiveSocket.port}');
-          
-          try {
-            receiveSocket.broadcastEnabled = true;
-            _log('mDNS: Broadcast enabled on receive socket');
-          } catch (e) {
-            _log('mDNS: Failed to enable broadcast on receive socket: ${e.toString().split('\n').first}');
-          }
-          
-          // Try to join multicast (may fail with 10042, but we'll try)
-          try {
-            final InternetAddress multicastAddress = InternetAddress('224.0.0.251');
-            receiveSocket.joinMulticast(multicastAddress);
-            _log('mDNS: Receive socket joined multicast group 224.0.0.251');
-          } catch (e) {
-            final String errorStr = e.toString();
-            if (errorStr.contains('10042')) {
-              _log('mDNS: joinMulticast failed with 10042 on receive socket (expected), continuing without it');
-              _log('mDNS: Socket may still receive multicast packets on Windows');
-            } else {
-              _log('mDNS: Failed to join multicast on receive socket: ${errorStr.split('\n').first}');
-            }
-          }
-          
-          // Give socket a moment to be ready
-          await Future<void>.delayed(const Duration(milliseconds: 100));
-          _log('mDNS: Receive socket is ready');
-        } catch (e) {
-          _log('mDNS: Failed to create receive socket: ${e.toString().split('\n').first}');
-          receiveSocket = null;
-        }
-      }
+      // If client didn't start, we'll use querySocket for receiving
+      // On Windows, joinMulticast on anyIPv4 fails, so we skip receiveSocket
+      // We'll rely on querySocket (bound to specific interface) for receiving
       
       // Create query socket for this interface
       // Use port 5353 (same as receive port) to ensure responses come to the right place
@@ -948,6 +908,22 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           _log('mDNS: Failed to enable broadcast on query socket: ${e.toString().split('\n').first}');
         }
         
+        // Try to join multicast on querySocket (bound to specific interface)
+        // This might work even if it failed on MDnsClient
+        try {
+          final InternetAddress multicastAddress = InternetAddress('224.0.0.251');
+          querySocket.joinMulticast(multicastAddress);
+          _log('mDNS: Query socket joined multicast group 224.0.0.251 on interface ${interfaceAddress.address}');
+        } catch (e) {
+          final String errorStr = e.toString();
+          if (errorStr.contains('10042') || errorStr.contains('10065')) {
+            _log('mDNS: joinMulticast failed on query socket (${errorStr.split('\n').first}), will try without it');
+            _log('mDNS: On Windows, multicast may work without explicit joinMulticast');
+          } else {
+            _log('mDNS: Failed to join multicast on query socket: ${errorStr.split('\n').first}');
+          }
+        }
+        
         // Send query manually
         _log('mDNS: Sending query from port ${querySocket.port} on $interfaceName...');
         await _sendMdnsQuery(querySocket, serviceType, interfaceAddress: interfaceAddress);
@@ -962,14 +938,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       if (!clientStarted) {
         _log('mDNS: Client not started, will receive responses manually on $interfaceName');
         
-        // Try both approaches: querySocket and receiveSocket
-        // mdns-sd uses one socket for both send/receive, but on Windows with Wi-Fi
-        // we may need anyIPv4 socket to receive multicast
-        final Duration waitTimeout = const Duration(seconds: 8);
-        int packetCount = 0;
-        
-        // First, try to receive on querySocket (same socket used for sending)
+        // Use querySocket for receiving (same socket used for sending)
+        // This is how mdns-sd works - one socket for both operations
+        // On Windows, we try joinMulticast on the specific interface (not anyIPv4)
         if (querySocket != null) {
+          final Duration waitTimeout = const Duration(seconds: 8);
+          int packetCount = 0;
+          
           _log('mDNS: Query sent from port ${querySocket.port}, listening for responses on querySocket...');
           _log('mDNS: Using querySocket for receiving (port ${querySocket.port}) - similar to mdns-sd approach');
           
@@ -1005,61 +980,16 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             cancelOnError: false,
           );
           
-          // Also listen on receiveSocket if available (anyIPv4)
-          StreamSubscription<RawSocketEvent>? receiveSubscription;
-          if (receiveSocket != null) {
-            _log('mDNS: Also listening on receiveSocket (anyIPv4:5353) for multicast responses...');
-            receiveSubscription = receiveSocket.listen(
-              (RawSocketEvent event) {
-                if (event == RawSocketEvent.read && receiveSocket != null) {
-                  try {
-                    final Datagram? datagram = receiveSocket.receive();
-                    if (datagram != null && datagram.data.isNotEmpty) {
-                      packetCount++;
-                      _log('mDNS: [receiveSocket] Received packet #$packetCount: ${datagram.data.length} bytes from ${datagram.address.address}:${datagram.port}');
-                      
-                      // Basic packet validation
-                      if (datagram.data.length >= 12) {
-                        final int flags = (datagram.data[2] << 8) | datagram.data[3];
-                        final bool isResponse = (flags & 0x8000) != 0;
-                        if (isResponse) {
-                          final int answerCount = (datagram.data[6] << 8) | datagram.data[7];
-                          _log('mDNS: [receiveSocket] DNS response with $answerCount answer record(s)');
-                        }
-                      }
-                    }
-                  } catch (e) {
-                    _log('mDNS: [receiveSocket] Error processing packet: ${e.toString().split('\n').first}');
-                  }
-                }
-              },
-              onError: (error) {
-                _log('mDNS: [receiveSocket] Error: $error');
-              },
-              cancelOnError: false,
-            );
-          }
-          
           // Wait for timeout
-          _log('mDNS: Waiting ${waitTimeout.inSeconds} seconds for responses...');
+          _log('mDNS: Waiting ${waitTimeout.inSeconds} seconds for responses on querySocket...');
           await Future<void>.delayed(waitTimeout);
           
-          // Cancel subscriptions
+          // Cancel subscription
           await querySubscription?.cancel();
-          await receiveSubscription?.cancel();
           
-          _log('mDNS: Finished waiting for responses on $interfaceName (received $packetCount packet(s) total)');
+          _log('mDNS: Finished waiting for responses on $interfaceName (received $packetCount packet(s))');
         } else {
           _log('mDNS: Query socket is null, cannot receive responses');
-        }
-        
-        // Clean up receive socket if it was created
-        if (receiveSocket != null) {
-          try {
-            receiveSocket.close();
-          } catch (e) {
-            // Ignore close errors
-          }
         }
         
         return;
