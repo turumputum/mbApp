@@ -874,121 +874,96 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       // Give a moment for initialization
       await Future<void>.delayed(const Duration(milliseconds: 100));
       
-      // If client didn't start, use mdns-sd approach:
-      // On Windows, bind to INADDR_ANY (0.0.0.0) for both sending and receiving
-      // This is how mdns-sd works - one socket on anyIPv4:5353
+      // If client didn't start, use shared socket if provided (mdns-sd approach)
+      // On Windows, mdns-sd uses ONE socket on INADDR_ANY for ALL interfaces
       if (!clientStarted) {
-        try {
-          _log('mDNS: Creating socket on anyIPv4:5353 (mdns-sd approach for Windows)...');
-          _log('mDNS: On Windows, must bind to INADDR_ANY (0.0.0.0), not specific interface address');
-          
+        if (sharedSocket != null) {
+          // Use shared socket for sending query (mdns-sd approach)
+          _log('mDNS: Using shared socket on anyIPv4:5353 for sending query (interface: ${interfaceAddress.address})...');
+          await _sendMdnsQuery(sharedSocket, serviceType, interfaceAddress: interfaceAddress);
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+          // Don't create querySocket - we'll use sharedSocket for receiving
+          querySocket = null;
+        } else {
+          // Fallback: create socket for this interface only (should not happen if sharedSocket is created)
+          _log('mDNS: WARNING - No shared socket provided, creating fallback socket for $interfaceName');
           try {
             querySocket = await RawDatagramSocket.bind(
-              InternetAddress.anyIPv4, // INADDR_ANY - as per mdns-sd approach
-              5353, // mDNS port
+              InternetAddress.anyIPv4,
+              5353,
               reuseAddress: true,
               reusePort: Platform.isWindows ? false : true,
             );
-            _log('mDNS: Socket bound to anyIPv4:5353, port: ${querySocket.port}');
-          } catch (e) {
-            _log('mDNS: Failed to bind to anyIPv4:5353: ${e.toString().split('\n').first}');
-            querySocket = null;
-          }
-          
-          if (querySocket != null) {
+            _log('mDNS: Fallback socket bound to anyIPv4:5353, port: ${querySocket.port}');
+            
             try {
               querySocket.broadcastEnabled = true;
-              _log('mDNS: Broadcast enabled on socket');
+              _log('mDNS: Broadcast enabled on fallback socket');
             } catch (e) {
               _log('mDNS: Failed to enable broadcast: ${e.toString().split('\n').first}');
             }
             
-            // Don't try joinMulticast - it fails on Windows
-            // According to mdns-sd approach, socket on INADDR_ANY can receive multicast without joinMulticast
-            _log('mDNS: Socket ready (not using joinMulticast - mdns-sd approach)');
-            
-            // Give socket a moment to be ready
             await Future<void>.delayed(const Duration(milliseconds: 100));
-            
-            // Send query manually - socket is on anyIPv4, but we specify interface in send
-            _log('mDNS: Sending query from anyIPv4 socket (interface: ${interfaceAddress.address})...');
+            _log('mDNS: Sending query from fallback socket (interface: ${interfaceAddress.address})...');
             await _sendMdnsQuery(querySocket, serviceType, interfaceAddress: interfaceAddress);
             await Future<void>.delayed(const Duration(milliseconds: 50));
+          } catch (e, stackTrace) {
+            _log('mDNS: Failed to create/send on $interfaceName: ${e.toString().split('\n').first}');
+            _log('mDNS: Error stack trace: ${stackTrace.toString().split('\n').take(3).join('\n')}');
           }
-        } catch (e, stackTrace) {
-          _log('mDNS: Failed to create/send on $interfaceName: ${e.toString().split('\n').first}');
-          _log('mDNS: Error stack trace: ${stackTrace.toString().split('\n').take(3).join('\n')}');
         }
       }
       
       // Only use client.lookup() if client started successfully
       // If client.start() failed with 10042, we'll receive responses manually
+      // BUT: if sharedSocket is provided, receiving is handled centrally in _scanMdnsBroadcasts
+      // This matches mdns-sd approach - one socket, one listener for all interfaces
       if (!clientStarted) {
-        _log('mDNS: Client not started, will receive responses manually on $interfaceName');
-        
-        // Use sharedSocket or querySocket for receiving - mdns-sd approach
-        // On Windows, socket on INADDR_ANY can receive multicast without joinMulticast
-        final RawDatagramSocket? receiveSocket = sharedSocket ?? querySocket;
-        if (receiveSocket != null) {
+        if (sharedSocket != null) {
+          // Query sent via shared socket, receiving is handled centrally
+          _log('mDNS: Query sent via shared socket, responses will be received centrally (mdns-sd approach)');
+          // Don't wait here - receiving is handled in _scanMdnsBroadcasts
+          return;
+        } else if (querySocket != null) {
+          // Fallback: if no shared socket, wait for responses on this interface's socket
+          _log('mDNS: Client not started, waiting for responses on fallback socket for $interfaceName');
           final Duration waitTimeout = const Duration(seconds: 8);
           int packetCount = 0;
           
-          _log('mDNS: Query sent, listening for responses on anyIPv4:5353 socket (mdns-sd approach)...');
-          _log('mDNS: Using ${sharedSocket != null ? "shared" : "interface"} socket on INADDR_ANY for receiving (mdns-sd approach)');
-          
-          // Listen to receiveSocket events asynchronously
-          final StreamSubscription<RawSocketEvent>? querySubscription = receiveSocket.listen(
+          final StreamSubscription<RawSocketEvent>? querySubscription = querySocket.listen(
             (RawSocketEvent event) {
-              if (event == RawSocketEvent.read) {
+              if (event == RawSocketEvent.read && querySocket != null) {
                 try {
-                  final Datagram? datagram = receiveSocket.receive();
+                  final Datagram? datagram = querySocket.receive();
                   if (datagram != null && datagram.data.isNotEmpty) {
                     packetCount++;
-                    _log('mDNS: Received packet #$packetCount: ${datagram.data.length} bytes from ${datagram.address.address}:${datagram.port}');
-                    
-                    // Basic packet validation
-                    if (datagram.data.length >= 12) {
-                      final int flags = (datagram.data[2] << 8) | datagram.data[3];
-                      final bool isResponse = (flags & 0x8000) != 0;
-                      if (isResponse) {
-                        final int answerCount = (datagram.data[6] << 8) | datagram.data[7];
-                        _log('mDNS: DNS response with $answerCount answer record(s)');
-                        // TODO: Parse DNS packet to extract PTR, SRV, TXT, A records
-                      }
-                    }
+                    _log('mDNS: [fallback] Received packet #$packetCount: ${datagram.data.length} bytes from ${datagram.address.address}:${datagram.port}');
                   }
                 } catch (e) {
-                  _log('mDNS: Error processing packet: ${e.toString().split('\n').first}');
+                  _log('mDNS: [fallback] Error processing packet: ${e.toString().split('\n').first}');
                 }
               }
             },
             onError: (error) {
-              _log('mDNS: Socket error: $error');
+              _log('mDNS: [fallback] Socket error: $error');
             },
             cancelOnError: false,
           );
           
-          // Wait for timeout
-          _log('mDNS: Waiting ${waitTimeout.inSeconds} seconds for responses...');
           await Future<void>.delayed(waitTimeout);
-          
-          // Cancel subscription (but don't close shared socket - it's used by other interfaces)
           await querySubscription?.cancel();
-          if (querySocket != null && sharedSocket == null) {
-            // Only close if it's not a shared socket
-            try {
-              querySocket.close();
-            } catch (e) {
-              // Ignore close errors
-            }
+          try {
+            querySocket.close();
+          } catch (e) {
+            // Ignore close errors
           }
           
           _log('mDNS: Finished waiting for responses on $interfaceName (received $packetCount packet(s))');
+          return;
         } else {
-          _log('mDNS: Socket is null, cannot receive responses');
+          _log('mDNS: No socket available for $interfaceName');
+          return;
         }
-        
-        return;
       }
       
       // Query for the specific service type with timeout
