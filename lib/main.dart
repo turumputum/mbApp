@@ -833,12 +833,48 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       });  
 
       try {
+        _log('mDNS: Attempting to start client on $interfaceName (${interfaceAddress.address})...');
         await client.start();
-      } catch (e) {
+        _log('mDNS: Client started successfully on $interfaceName');
+      } catch (e, stackTrace) {
         // Check if it's a protocol option error (common on VPN/virtual interfaces)
         final String errorStr = e.toString();
+        final String stackStr = stackTrace.toString();
+        
+        // Log full error details for debugging
+        _log('mDNS: Error starting client on $interfaceName: $errorStr');
+        _log('mDNS: Stack trace: ${stackStr.split('\n').take(5).join('\n')}');
+        
         if (errorStr.contains('10042') || errorStr.contains('getsockopt') || errorStr.contains('setsockopt')) {
-          _log('mDNS: Skipping $interfaceName - multicast not supported (VPN/virtual interface?)');
+          _log('mDNS: Error 10042 detected on $interfaceName - checking if Wi-Fi interface exists...');
+          
+          // Check if Wi-Fi interface exists in system
+          try {
+            final List<NetworkInterface> allInterfaces = await NetworkInterface.list(
+              includeLinkLocal: true,
+              type: InternetAddressType.IPv4,
+            );
+            
+            final bool hasWifi = allInterfaces.any((iface) {
+              final name = iface.name.toLowerCase();
+              return name.contains('wireless') || 
+                     name.contains('wifi') || 
+                     name.contains('wi-fi') ||
+                     name.contains('беспроводная') ||
+                     name.contains('802.11');
+            });
+            
+            if (hasWifi) {
+              _log('mDNS: Wi-Fi interface detected in system - this may be causing error 10042 on $interfaceName');
+              _log('mDNS: Error 10042 likely caused by Windows multicast behavior when Wi-Fi interface is present');
+            } else {
+              _log('mDNS: No Wi-Fi interface detected - error 10042 may be due to other reasons');
+            }
+          } catch (checkError) {
+            _log('mDNS: Failed to check for Wi-Fi interface: ${checkError.toString().split('\n').first}');
+          }
+          
+          _log('mDNS: Skipping $interfaceName due to error 10042');
         } else {
           _log('mDNS: Failed to start on $interfaceName: ${errorStr.split('\n').first}');
         }
@@ -1035,6 +1071,42 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           }
           
           _log('mDNS: Scanning on ${interfaceList.length} interface(s) in parallel');
+          
+          // Log interface details for debugging
+          for (final entry in interfaceList) {
+            _log('mDNS: Interface: ${entry.name} -> ${entry.address.address}');
+          }
+          
+          // Check if Wi-Fi interface exists (even if not in our list)
+          try {
+            final List<NetworkInterface> allInterfaces = await NetworkInterface.list(
+              includeLinkLocal: true,
+              type: InternetAddressType.IPv4,
+            );
+            
+            final List<NetworkInterface> wifiInterfaces = allInterfaces.where((iface) {
+              final name = iface.name.toLowerCase();
+              return name.contains('wireless') || 
+                     name.contains('wifi') || 
+                     name.contains('wi-fi') ||
+                     name.contains('беспроводная') ||
+                     name.contains('802.11');
+            }).toList();
+            
+            if (wifiInterfaces.isNotEmpty) {
+              _log('mDNS: Wi-Fi interface(s) detected in system: ${wifiInterfaces.map((i) => i.name).join(', ')}');
+              for (final wifiIface in wifiInterfaces) {
+                _log('mDNS:   Wi-Fi interface "${wifiIface.name}" has ${wifiIface.addresses.length} address(es)');
+                for (final addr in wifiIface.addresses) {
+                  _log('mDNS:     - ${addr.address} (loopback: ${addr.isLoopback}, linkLocal: ${addr.isLinkLocal})');
+                }
+              }
+            } else {
+              _log('mDNS: No Wi-Fi interfaces detected in system');
+            }
+          } catch (e) {
+            _log('mDNS: Failed to check for Wi-Fi interfaces: ${e.toString().split('\n').first}');
+          }
           
           // Scan all interfaces in parallel for each service type
           for (final String serviceType in serviceTypes) {
