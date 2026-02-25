@@ -343,18 +343,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               final Datagram? datagram = _mdnsSocket!.receive();
               if (datagram != null && datagram.data.isNotEmpty) {
                 _mdnsPacketCount++;
-                _log('mDNS: Received packet #$_mdnsPacketCount: ${datagram.data.length} bytes from ${datagram.address.address}:${datagram.port}');
+                _log('mDNS: ===== Received packet #$_mdnsPacketCount =====');
+                _log('mDNS: From: ${datagram.address.address}:${datagram.port}');
+                _log('mDNS: Size: ${datagram.data.length} bytes');
                 
-                // Parse DNS response
-                if (datagram.data.length >= 12) {
-                  final int flags = (datagram.data[2] << 8) | datagram.data[3];
-                  final bool isResponse = (flags & 0x8000) != 0;
-                  if (isResponse) {
-                    final int answerCount = (datagram.data[6] << 8) | datagram.data[7];
-                    _log('mDNS: DNS response with $answerCount answer record(s)');
-                    // TODO: Parse DNS packet to extract PTR, SRV, TXT, A records
-                  }
-                }
+                // Parse and log DNS packet details
+                _parseAndLogDnsPacket(datagram.data);
               }
             } catch (e) {
               _log('mDNS: Error processing packet: ${e.toString().split('\n').first}');
@@ -431,6 +425,247 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       return wsagetlasterror();
     } catch (e) {
       return -1;
+    }
+  }
+  
+  /// Parse and log DNS packet details
+  void _parseAndLogDnsPacket(Uint8List data) {
+    if (data.length < 12) {
+      _log('mDNS: Packet too short (${data.length} bytes), minimum 12 bytes required');
+      return;
+    }
+    
+    try {
+      // DNS Header (12 bytes)
+      final int id = (data[0] << 8) | data[1];
+      final int flags = (data[2] << 8) | data[3];
+      final int questions = (data[4] << 8) | data[5];
+      final int answerRRs = (data[6] << 8) | data[7];
+      final int authorityRRs = (data[8] << 8) | data[9];
+      final int additionalRRs = (data[10] << 8) | data[11];
+      
+      final bool isResponse = (flags & 0x8000) != 0;
+      final bool isAuthoritative = (flags & 0x0400) != 0;
+      final bool isTruncated = (flags & 0x0200) != 0;
+      final bool recursionDesired = (flags & 0x0100) != 0;
+      final bool recursionAvailable = (flags & 0x0080) != 0;
+      final int responseCode = flags & 0x000F;
+      
+      _log('mDNS: DNS Header:');
+      _log('mDNS:   ID: 0x${id.toRadixString(16).padLeft(4, '0')}');
+      _log('mDNS:   Flags: 0x${flags.toRadixString(16).padLeft(4, '0')}');
+      _log('mDNS:   Type: ${isResponse ? "Response" : "Query"}');
+      if (isResponse) {
+        _log('mDNS:   Response Code: $responseCode');
+        _log('mDNS:   Authoritative: $isAuthoritative');
+        _log('mDNS:   Recursion Available: $recursionAvailable');
+      } else {
+        _log('mDNS:   Recursion Desired: $recursionDesired');
+      }
+      _log('mDNS:   Truncated: $isTruncated');
+      _log('mDNS:   Questions: $questions');
+      _log('mDNS:   Answer RRs: $answerRRs');
+      _log('mDNS:   Authority RRs: $authorityRRs');
+      _log('mDNS:   Additional RRs: $additionalRRs');
+      
+      int offset = 12;
+      
+      // Parse Questions
+      if (questions > 0) {
+        _log('mDNS: Questions:');
+        for (int i = 0; i < questions && offset < data.length; i++) {
+          final result = _parseDnsName(data, offset);
+          final String qname = result[0] as String;
+          offset = result[1] as int;
+          
+          if (offset + 4 > data.length) break;
+          
+          final int qtype = (data[offset] << 8) | data[offset + 1];
+          final int qclass = (data[offset + 2] << 8) | data[offset + 3];
+          offset += 4;
+          
+          final String qtypeStr = _getDnsTypeName(qtype);
+          _log('mDNS:   [$i] QNAME: $qname, QTYPE: $qtypeStr ($qtype), QCLASS: $qclass');
+        }
+      }
+      
+      // Parse Answer RRs
+      if (answerRRs > 0) {
+        _log('mDNS: Answer Records:');
+        for (int i = 0; i < answerRRs && offset < data.length; i++) {
+          final result = _parseDnsRecord(data, offset, 'Answer');
+          if (result == null) break;
+          offset = result['offset'] as int;
+        }
+      }
+      
+      // Parse Authority RRs
+      if (authorityRRs > 0) {
+        _log('mDNS: Authority Records:');
+        for (int i = 0; i < authorityRRs && offset < data.length; i++) {
+          final result = _parseDnsRecord(data, offset, 'Authority');
+          if (result == null) break;
+          offset = result['offset'] as int;
+        }
+      }
+      
+      // Parse Additional RRs
+      if (additionalRRs > 0) {
+        _log('mDNS: Additional Records:');
+        for (int i = 0; i < additionalRRs && offset < data.length; i++) {
+          final result = _parseDnsRecord(data, offset, 'Additional');
+          if (result == null) break;
+          offset = result['offset'] as int;
+        }
+      }
+      
+      _log('mDNS: ===== End of packet #$_mdnsPacketCount =====');
+    } catch (e, stackTrace) {
+      _log('mDNS: Error parsing DNS packet: ${e.toString().split('\n').first}');
+      _log('mDNS: Stack trace: ${stackTrace.toString().split('\n').take(3).join('\n')}');
+      _log('mDNS: Packet hex dump: ${data.take(64).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}...');
+    }
+  }
+  
+  /// Parse DNS name (with compression support)
+  List<dynamic> _parseDnsName(Uint8List data, int offset) {
+    final List<String> labels = [];
+    int currentOffset = offset;
+    bool jumped = false;
+    int originalOffset = offset;
+    
+    while (currentOffset < data.length) {
+      final int length = data[currentOffset];
+      
+      if (length == 0) {
+        // End of name
+        currentOffset++;
+        break;
+      } else if ((length & 0xC0) == 0xC0) {
+        // Compression pointer
+        if (!jumped) {
+          originalOffset = currentOffset + 2;
+          jumped = true;
+        }
+        final int pointer = ((length & 0x3F) << 8) | data[currentOffset + 1];
+        currentOffset = pointer;
+      } else {
+        // Normal label
+        if (currentOffset + length + 1 > data.length) break;
+        final String label = String.fromCharCodes(
+          data.sublist(currentOffset + 1, currentOffset + 1 + length),
+        );
+        labels.add(label);
+        currentOffset += length + 1;
+      }
+    }
+    
+    final String name = labels.join('.');
+    final int nextOffset = jumped ? originalOffset : currentOffset;
+    return [name, nextOffset];
+  }
+  
+  /// Parse DNS resource record
+  Map<String, dynamic>? _parseDnsRecord(Uint8List data, int offset, String section) {
+    try {
+      // Parse name
+      final nameResult = _parseDnsName(data, offset);
+      final String name = nameResult[0] as String;
+      int currentOffset = nameResult[1] as int;
+      
+      if (currentOffset + 10 > data.length) return null;
+      
+      // Parse record header
+      final int type = (data[currentOffset] << 8) | data[currentOffset + 1];
+      final int rclass = (data[currentOffset + 2] << 8) | data[currentOffset + 3];
+      final int ttl = (data[currentOffset + 4] << 24) |
+                      (data[currentOffset + 5] << 16) |
+                      (data[currentOffset + 6] << 8) |
+                      data[currentOffset + 7];
+      final int rdlength = (data[currentOffset + 8] << 8) | data[currentOffset + 9];
+      currentOffset += 10;
+      
+      if (currentOffset + rdlength > data.length) return null;
+      
+      final String typeName = _getDnsTypeName(type);
+      final String classStr = rclass == 1 ? 'IN' : '0x${rclass.toRadixString(16)}';
+      
+      _log('mDNS:   [$section] NAME: $name');
+      _log('mDNS:      TYPE: $typeName ($type), CLASS: $classStr, TTL: $ttl');
+      _log('mDNS:      RDLENGTH: $rdlength bytes');
+      
+      // Parse record data based on type
+      final Uint8List rdata = data.sublist(currentOffset, currentOffset + rdlength);
+      
+      switch (type) {
+        case 1: // A record
+          if (rdlength == 4) {
+            final String ip = '${rdata[0]}.${rdata[1]}.${rdata[2]}.${rdata[3]}';
+            _log('mDNS:      A: $ip');
+          }
+          break;
+        case 12: // PTR record
+          final ptrResult = _parseDnsName(data, currentOffset);
+          final String ptrName = ptrResult[0] as String;
+          _log('mDNS:      PTR: $ptrName');
+          break;
+        case 33: // SRV record
+          if (rdlength >= 6) {
+            final int priority = (rdata[0] << 8) | rdata[1];
+            final int weight = (rdata[2] << 8) | rdata[3];
+            final int port = (rdata[4] << 8) | rdata[5];
+            final srvResult = _parseDnsName(data, currentOffset + 6);
+            final String target = srvResult[0] as String;
+            _log('mDNS:      SRV: Priority=$priority, Weight=$weight, Port=$port, Target=$target');
+          }
+          break;
+        case 16: // TXT record
+          _log('mDNS:      TXT: ${_parseTxtRecord(rdata)}');
+          break;
+        default:
+          _log('mDNS:      DATA: ${rdata.take(32).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}${rdlength > 32 ? '...' : ''}');
+      }
+      
+      return {'offset': currentOffset + rdlength};
+    } catch (e) {
+      _log('mDNS: Error parsing record: ${e.toString().split('\n').first}');
+      return null;
+    }
+  }
+  
+  /// Parse TXT record
+  String _parseTxtRecord(Uint8List data) {
+    final List<String> txtStrings = [];
+    int offset = 0;
+    
+    while (offset < data.length) {
+      if (offset >= data.length) break;
+      final int length = data[offset];
+      if (length == 0 || offset + length + 1 > data.length) break;
+      
+      final String txt = String.fromCharCodes(
+        data.sublist(offset + 1, offset + 1 + length),
+      );
+      txtStrings.add(txt);
+      offset += length + 1;
+    }
+    
+    return txtStrings.join(' | ');
+  }
+  
+  /// Get DNS type name
+  String _getDnsTypeName(int type) {
+    switch (type) {
+      case 1: return 'A';
+      case 2: return 'NS';
+      case 5: return 'CNAME';
+      case 6: return 'SOA';
+      case 12: return 'PTR';
+      case 15: return 'MX';
+      case 16: return 'TXT';
+      case 28: return 'AAAA';
+      case 33: return 'SRV';
+      default: return 'TYPE$type';
     }
   }
 
