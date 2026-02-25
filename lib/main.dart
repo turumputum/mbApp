@@ -124,6 +124,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   Map<String, List<String>> _availableKeys = {};
   Map<String, String> _chapterDescriptions = {};
   Map<String, String> _chapterWildcards = {}; // Maps wildcard patterns to actual chapter names
+  
+  // mDNS socket (long-lived, opened at startup, closed at exit)
+  RawDatagramSocket? _mdnsSocket;
+  StreamSubscription<RawSocketEvent>? _mdnsSocketSubscription;
+  int _mdnsPacketCount = 0;
   List<String> get _removableRoots {
     if (Platform.isWindows) {
       // Windows: Check all available drive letters
@@ -173,6 +178,78 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     _setupConsoleAutocompleteListener();
     _startBackgroundScanning();
     _loadConsoleHistory();
+    _initializeMdnsSocket();
+  }
+  
+  /// Initialize mDNS socket (long-lived, opened at startup)
+  Future<void> _initializeMdnsSocket() async {
+    if (!Platform.isWindows) {
+      // On non-Windows, we don't need a persistent socket
+      return;
+    }
+    
+    try {
+      _log('mDNS: Initializing persistent socket on anyIPv4:5353...');
+      
+      // Create ONE socket on anyIPv4:5353
+      _mdnsSocket = await RawDatagramSocket.bind(
+        InternetAddress.anyIPv4, // INADDR_ANY - as per mdns-sd
+        5353, // mDNS port - SAME for sending and receiving
+        reuseAddress: true,
+        reusePort: false, // Not supported on Windows
+      );
+      
+      _log('mDNS: Socket bound to anyIPv4:5353, port: ${_mdnsSocket!.port}');
+      
+      try {
+        _mdnsSocket!.broadcastEnabled = true;
+        _log('mDNS: Broadcast enabled on socket');
+      } catch (e) {
+        _log('mDNS: Failed to enable broadcast: ${e.toString().split('\n').first}');
+      }
+      
+      // Set up persistent listener
+      _mdnsPacketCount = 0;
+      _mdnsSocketSubscription = _mdnsSocket!.listen(
+        (RawSocketEvent event) {
+          if (event == RawSocketEvent.read && _mdnsSocket != null) {
+            try {
+              final Datagram? datagram = _mdnsSocket!.receive();
+              if (datagram != null && datagram.data.isNotEmpty) {
+                _mdnsPacketCount++;
+                _log('mDNS: Received packet #$_mdnsPacketCount: ${datagram.data.length} bytes from ${datagram.address.address}:${datagram.port}');
+                
+                // Parse DNS response
+                if (datagram.data.length >= 12) {
+                  final int flags = (datagram.data[2] << 8) | datagram.data[3];
+                  final bool isResponse = (flags & 0x8000) != 0;
+                  if (isResponse) {
+                    final int answerCount = (datagram.data[6] << 8) | datagram.data[7];
+                    _log('mDNS: DNS response with $answerCount answer record(s)');
+                    // TODO: Parse DNS packet to extract PTR, SRV, TXT, A records
+                  }
+                }
+              }
+            } catch (e) {
+              _log('mDNS: Error processing packet: ${e.toString().split('\n').first}');
+            }
+          }
+        },
+        onError: (error) {
+          _log('mDNS: Socket error: $error');
+        },
+        cancelOnError: false,
+      );
+      
+      // Give socket a moment to be ready
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      _log('mDNS: Persistent socket ready and listening');
+      
+    } catch (e, stackTrace) {
+      _log('mDNS: Failed to initialize socket: ${e.toString().split('\n').first}');
+      _log('mDNS: Error stack trace: ${stackTrace.toString().split('\n').take(5).join('\n')}');
+      _mdnsSocket = null;
+    }
   }
 
   @override
@@ -867,89 +944,28 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       final List<String> serviceTypes = ['_ftp._tcp'];
       
       if (Platform.isWindows) {
-        // Complete rewrite for Windows - mdns-sd approach
-        // ONE socket on anyIPv4:5353 for BOTH sending and receiving
-        // This matches mdns-sd library implementation exactly
+        // Use persistent socket (opened at startup)
+        if (_mdnsSocket == null) {
+          _log('mDNS: Socket not initialized yet, waiting...');
+          // Wait a bit for socket initialization
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+          if (_mdnsSocket == null) {
+            _log('mDNS: Socket still not available, skipping scan');
+            return;
+          }
+        }
         
-        try {
-          _log('mDNS: Creating single socket on anyIPv4:5353 (mdns-sd approach for Windows)...');
-          _log('mDNS: On Windows, mdns-sd uses ONE socket on INADDR_ANY:5353 for all operations');
+        // Send queries for each service type using persistent socket
+        for (final String serviceType in serviceTypes) {
+          _log('mDNS: Discovering $serviceType services...');
           
-          // Create ONE socket on anyIPv4:5353
-          final RawDatagramSocket socket = await RawDatagramSocket.bind(
-            InternetAddress.anyIPv4, // INADDR_ANY - as per mdns-sd
-            5353, // mDNS port - SAME for sending and receiving
-            reuseAddress: true,
-            reusePort: false, // Not supported on Windows
-          );
+          // Send query from the persistent socket (mdns-sd approach)
+          await _sendMdnsQueryFromSocket(_mdnsSocket!, serviceType);
           
-          _log('mDNS: Socket bound to anyIPv4:5353, port: ${socket.port}');
-          
-          try {
-            socket.broadcastEnabled = true;
-            _log('mDNS: Broadcast enabled on socket');
-          } catch (e) {
-            _log('mDNS: Failed to enable broadcast: ${e.toString().split('\n').first}');
-          }
-          
-          // Set up listener BEFORE sending queries
-          int packetCount = 0;
-          final StreamSubscription<RawSocketEvent> subscription = socket.listen(
-            (RawSocketEvent event) {
-              if (event == RawSocketEvent.read) {
-                try {
-                  final Datagram? datagram = socket.receive();
-                  if (datagram != null && datagram.data.isNotEmpty) {
-                    packetCount++;
-                    _log('mDNS: Received packet #$packetCount: ${datagram.data.length} bytes from ${datagram.address.address}:${datagram.port}');
-                    
-                    // Parse DNS response
-                    if (datagram.data.length >= 12) {
-                      final int flags = (datagram.data[2] << 8) | datagram.data[3];
-                      final bool isResponse = (flags & 0x8000) != 0;
-                      if (isResponse) {
-                        final int answerCount = (datagram.data[6] << 8) | datagram.data[7];
-                        _log('mDNS: DNS response with $answerCount answer record(s)');
-                        // TODO: Parse DNS packet to extract PTR, SRV, TXT, A records
-                      }
-                    }
-                  }
-                } catch (e) {
-                  _log('mDNS: Error processing packet: ${e.toString().split('\n').first}');
-                }
-              }
-            },
-            onError: (error) {
-              _log('mDNS: Socket error: $error');
-            },
-            cancelOnError: false,
-          );
-          
-          // Give socket a moment to be ready
-          await Future<void>.delayed(const Duration(milliseconds: 100));
-          _log('mDNS: Socket ready, listener active');
-          
-          // Send queries for each service type
-          for (final String serviceType in serviceTypes) {
-            _log('mDNS: Discovering $serviceType services...');
-            
-            // Send query from the SAME socket (mdns-sd approach)
-            await _sendMdnsQueryFromSocket(socket, serviceType);
-            
-            // Wait for responses
-            _log('mDNS: Waiting for responses on socket (port ${socket.port})...');
-            await Future<void>.delayed(const Duration(seconds: 8));
-            _log('mDNS: Finished waiting for $serviceType (received $packetCount packet(s) total)');
-          }
-          
-          // Cancel subscription and close socket
-          await subscription.cancel();
-          socket.close();
-          _log('mDNS: Socket closed');
-          
-        } catch (e, stackTrace) {
-          _log('mDNS: Failed to create socket: ${e.toString().split('\n').first}');
-          _log('mDNS: Error stack trace: ${stackTrace.toString().split('\n').take(5).join('\n')}');
+          // Wait for responses
+          _log('mDNS: Waiting for responses on socket (port ${_mdnsSocket!.port})...');
+          await Future<void>.delayed(const Duration(seconds: 8));
+          _log('mDNS: Finished waiting for $serviceType (received $_mdnsPacketCount packet(s) total)');
         }
       } else {
         // On non-Windows, use standard approach
@@ -3209,6 +3225,11 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
     _configControllers.clear();
     _detailsTabController.dispose();
+    // Close mDNS socket
+    _mdnsSocketSubscription?.cancel();
+    _mdnsSocket?.close();
+    _mdnsSocket = null;
+    _log('mDNS: Persistent socket closed');
     super.dispose();
   }
 
