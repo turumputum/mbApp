@@ -1,0 +1,252 @@
+PS C:\Users\user\Desktop\mbApp> .\0_run.cmd
+Launching lib\main.dart on Windows in debug mode...
+Building Windows application...                                        |
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                                                    7,0s
+√ Built build\windows\x64\runner\Debug\moduleboxapp.exe
+19:50:03  Starting background device discovery...
+19:50:03  Serial: sent probe to COM1
+19:50:03  Serial: sent probe to COM0
+19:50:03  Serial: sent probe to COM58
+19:50:03  mDNS: Starting discovery on windows...
+19:50:03  mDNS: Socket not initialized yet, waiting...
+19:50:03  mDNS: Initializing persistent socket on anyIPv4:5353 using WinAPI...
+Syncing files to device Windows...                                  81ms
+
+Flutter run key commands.
+r Hot reload.
+R Hot restart.
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+A Dart VM Service on Windows is available at: http://127.0.0.1:6446/i88V7SFAaDU=/
+The Flutter DevTools debugger and profiler on Windows is available at: http://127.0.0.1:6446/i88V7SFAaDU=/devtools/?uri=ws://127.0.0.1:6446/i88V7SFAaDU=/ws
+19:50:03  mDNS: Socket bound to anyIPv4:5353, port: 5353
+19:50:03  mDNS: Setting SO_REUSEADDR via WinAPI...
+19:50:03  mDNS: Could not access native socket handle via reflection: NoSuchMethodError: Class '_RawDatagramSocket' has no instance getter '_socket'.
+19:50:03  mDNS: Could not get native socket handle, using Dart API only
+19:50:03  mDNS: Joined multicast group via Dart API
+19:50:03  mDNS: Broadcast enabled on socket
+19:50:03  got "moduleBox:moduleBox" on COM58
+19:50:03  Found on COM58
+19:50:03  Serial: device "moduleBox" on COM58
+19:50:03  mDNS: Persistent socket ready and listening (WinAPI approach)
+19:50:03  mDNS: Discovering _ftp._tcp services...
+19:50:03  mDNS: Sent query for _ftp._tcp from socket (port 5353), 33 bytes to 224.0.0.251:5353
+19:50:03  mDNS: Waiting for responses on socket (port 5353)...
+19:50:03  mDNS: ===== Received packet #1 =====
+19:50:03  mDNS: From: 10.0.85.2:5353
+19:50:03  mDNS: Size: 33 bytes
+19:50:03  mDNS: DNS Header:
+19:50:03  mDNS:   ID: 0x0000
+19:50:03  mDNS:   Flags: 0x0000
+19:50:03  mDNS:   Type: Query
+19:50:03  mDNS:   Recursion Desired: false
+19:50:03  mDNS:   Truncated: false
+19:50:03  mDNS:   Questions: 1
+19:50:03  mDNS:   Answer RRs: 0
+19:50:03  mDNS:   Authority RRs: 0
+19:50:03  mDNS:   Additional RRs: 0
+19:50:03  mDNS: Questions:
+19:50:03  mDNS:   [0] QNAME: _ftp._tcp.local, QTYPE: PTR (12), QCLASS: 1
+19:50:03  mDNS: ===== End of packet #1 =====
+19:50:11  mDNS: Finished waiting for _ftp._tcp (received 1 packet(s) total)
+19:50:11  mDNS: scan finished.
+19:50:13  Serial: sent probe to COM1
+19:50:13  Serial: sent probe to COM0
+19:50:13  mDNS: Starting discovery on windows...
+19:50:13  mDNS: Discovering _ftp._tcp services...
+19:50:13  mDNS: Sent query for _ftp._tcp from socket (port 5353), 33 bytes to 224.0.0.251:5353
+19:50:13  mDNS: Waiting for responses on socket (port 5353)...
+19:50:13  mDNS: ===== Received packet #2 =====
+19:50:13  mDNS: From: 10.0.85.2:5353
+19:50:13  mDNS: Size: 33 bytes
+19:50:13  mDNS: DNS Header:
+19:50:13  mDNS:   ID: 0x0000
+19:50:13  mDNS:   Flags: 0x0000
+19:50:13  mDNS:   Type: Query
+19:50:13  mDNS:   Recursion Desired: false
+19:50:13  mDNS:   Truncated: false
+19:50:13  mDNS:   Questions: 1
+19:50:13  mDNS:   Answer RRs: 0
+19:50:13  mDNS:   Authority RRs: 0
+19:50:13  mDNS:   Additional RRs: 0
+19:50:13  mDNS: Questions:
+19:50:13  mDNS:   [0] QNAME: _ftp._tcp.local, QTYPE: PTR (12), QCLASS: 1
+19:50:13  mDNS: ===== End of packet #2 =====
+19:50:20  mDNS: ===== Received packet #3 =====
+19:50:20  mDNS: From: 10.0.85.2:5353
+19:50:20  mDNS: Size: 69 bytes
+19:50:20  mDNS: DNS Header:
+19:50:20  mDNS:   ID: 0x0000
+19:50:20  mDNS:   Flags: 0x0000
+19:50:20  mDNS:   Type: Query
+19:50:20  mDNS:   Recursion Desired: false
+19:50:20  mDNS:   Truncated: false
+19:50:20  mDNS:   Questions: 1
+19:50:20  mDNS:   Answer RRs: 0
+19:50:20  mDNS:   Authority RRs: 0
+19:50:20  mDNS:   Additional RRs: 0
+19:50:20  mDNS: Questions:
+19:50:20  mDNS:   [0] QNAME: FTP server on moduleBox 'mbLanSpkR'._ftp._tcp.local, QTYPE: SRV (33), QCLASS: 1
+19:50:20  mDNS: ===== End of packet #3 =====
+19:50:21  mDNS: Finished waiting for _ftp._tcp (received 3 packet(s) total)
+19:50:21  mDNS: scan finished.
+19:50:23  Serial: sent probe to COM1
+19:50:23  Serial: sent probe to COM0
+19:50:23  mDNS: Starting discovery on windows...
+19:50:23  mDNS: Discovering _ftp._tcp services...
+19:50:23  mDNS: Sent query for _ftp._tcp from socket (port 5353), 33 bytes to 224.0.0.251:5353
+19:50:23  mDNS: Waiting for responses on socket (port 5353)...
+19:50:23  mDNS: ===== Received packet #4 =====
+19:50:23  mDNS: From: 10.0.85.2:5353
+19:50:23  mDNS: Size: 33 bytes
+19:50:23  mDNS: DNS Header:
+19:50:23  mDNS:   ID: 0x0000
+19:50:23  mDNS:   Flags: 0x0000
+19:50:23  mDNS:   Type: Query
+19:50:23  mDNS:   Recursion Desired: false
+19:50:23  mDNS:   Truncated: false
+19:50:23  mDNS:   Questions: 1
+19:50:23  mDNS:   Answer RRs: 0
+19:50:23  mDNS:   Authority RRs: 0
+19:50:23  mDNS:   Additional RRs: 0
+19:50:23  mDNS: Questions:
+19:50:23  mDNS:   [0] QNAME: _ftp._tcp.local, QTYPE: PTR (12), QCLASS: 1
+19:50:23  mDNS: ===== End of packet #4 =====
+19:50:24  mDNS: ===== Received packet #5 =====
+19:50:24  mDNS: From: 10.0.85.2:5353
+19:50:24  mDNS: Size: 69 bytes
+19:50:24  mDNS: DNS Header:
+19:50:24  mDNS:   ID: 0x0000
+19:50:24  mDNS:   Flags: 0x0000
+19:50:24  mDNS:   Type: Query
+19:50:24  mDNS:   Recursion Desired: false
+19:50:24  mDNS:   Truncated: false
+19:50:24  mDNS:   Questions: 1
+19:50:24  mDNS:   Answer RRs: 0
+19:50:24  mDNS:   Authority RRs: 0
+19:50:24  mDNS:   Additional RRs: 0
+19:50:24  mDNS: Questions:
+19:50:24  mDNS:   [0] QNAME: FTP server on moduleBox 'mbLanSpkL'._ftp._tcp.local, QTYPE: SRV (33), QCLASS: 1
+19:50:24  mDNS: ===== End of packet #5 =====
+19:50:31  mDNS: Finished waiting for _ftp._tcp (received 5 packet(s) total)
+19:50:31  mDNS: scan finished.
+19:50:33  Serial: sent probe to COM1
+19:50:33  Serial: sent probe to COM0
+19:50:33  mDNS: Starting discovery on windows...
+19:50:33  mDNS: Discovering _ftp._tcp services...
+19:50:33  mDNS: Sent query for _ftp._tcp from socket (port 5353), 33 bytes to 224.0.0.251:5353
+19:50:33  mDNS: Waiting for responses on socket (port 5353)...
+19:50:33  mDNS: ===== Received packet #6 =====
+19:50:33  mDNS: From: 10.0.85.2:5353
+19:50:33  mDNS: Size: 33 bytes
+19:50:33  mDNS: DNS Header:
+19:50:33  mDNS:   ID: 0x0000
+19:50:33  mDNS:   Flags: 0x0000
+19:50:33  mDNS:   Type: Query
+19:50:33  mDNS:   Recursion Desired: false
+19:50:33  mDNS:   Truncated: false
+19:50:33  mDNS:   Questions: 1
+19:50:33  mDNS:   Answer RRs: 0
+19:50:33  mDNS:   Authority RRs: 0
+19:50:33  mDNS:   Additional RRs: 0
+19:50:33  mDNS: Questions:
+19:50:33  mDNS:   [0] QNAME: _ftp._tcp.local, QTYPE: PTR (12), QCLASS: 1
+19:50:33  mDNS: ===== End of packet #6 =====
+19:50:41  mDNS: Finished waiting for _ftp._tcp (received 6 packet(s) total)
+19:50:41  mDNS: scan finished.
+19:50:43  Serial: sent probe to COM1
+19:50:43  Serial: sent probe to COM0
+19:50:43  mDNS: Starting discovery on windows...
+19:50:43  mDNS: Discovering _ftp._tcp services...
+19:50:43  mDNS: Sent query for _ftp._tcp from socket (port 5353), 33 bytes to 224.0.0.251:5353
+19:50:43  mDNS: Waiting for responses on socket (port 5353)...
+19:50:43  mDNS: ===== Received packet #7 =====
+19:50:43  mDNS: From: 10.0.85.2:5353
+19:50:43  mDNS: Size: 33 bytes
+19:50:43  mDNS: DNS Header:
+19:50:43  mDNS:   ID: 0x0000
+19:50:43  mDNS:   Flags: 0x0000
+19:50:43  mDNS:   Type: Query
+19:50:43  mDNS:   Recursion Desired: false
+19:50:43  mDNS:   Truncated: false
+19:50:43  mDNS:   Questions: 1
+19:50:43  mDNS:   Answer RRs: 0
+19:50:43  mDNS:   Authority RRs: 0
+19:50:43  mDNS:   Additional RRs: 0
+19:50:43  mDNS: Questions:
+19:50:43  mDNS:   [0] QNAME: _ftp._tcp.local, QTYPE: PTR (12), QCLASS: 1
+19:50:43  mDNS: ===== End of packet #7 =====
+19:50:51  mDNS: Finished waiting for _ftp._tcp (received 7 packet(s) total)
+19:50:51  mDNS: scan finished.
+19:50:53  Serial: sent probe to COM1
+19:50:53  Serial: sent probe to COM0
+19:50:53  mDNS: Starting discovery on windows...
+19:50:53  mDNS: Discovering _ftp._tcp services...
+19:50:53  mDNS: Sent query for _ftp._tcp from socket (port 5353), 33 bytes to 224.0.0.251:5353
+19:50:53  mDNS: Waiting for responses on socket (port 5353)...
+19:50:53  mDNS: ===== Received packet #8 =====
+19:50:53  mDNS: From: 10.0.85.2:5353
+19:50:53  mDNS: Size: 33 bytes
+19:50:53  mDNS: DNS Header:
+19:50:53  mDNS:   ID: 0x0000
+19:50:53  mDNS:   Flags: 0x0000
+19:50:53  mDNS:   Type: Query
+19:50:53  mDNS:   Recursion Desired: false
+19:50:53  mDNS:   Truncated: false
+19:50:53  mDNS:   Questions: 1
+19:50:53  mDNS:   Answer RRs: 0
+19:50:53  mDNS:   Authority RRs: 0
+19:50:53  mDNS:   Additional RRs: 0
+19:50:53  mDNS: Questions:
+19:50:53  mDNS:   [0] QNAME: _ftp._tcp.local, QTYPE: PTR (12), QCLASS: 1
+19:50:53  mDNS: ===== End of packet #8 =====
+19:51:01  mDNS: Finished waiting for _ftp._tcp (received 8 packet(s) total)
+19:51:01  mDNS: scan finished.
+19:51:03  Serial: sent probe to COM1
+19:51:03  Serial: sent probe to COM0
+19:51:03  mDNS: Starting discovery on windows...
+19:51:03  mDNS: Discovering _ftp._tcp services...
+19:51:03  mDNS: Sent query for _ftp._tcp from socket (port 5353), 33 bytes to 224.0.0.251:5353
+19:51:03  mDNS: Waiting for responses on socket (port 5353)...
+19:51:03  mDNS: ===== Received packet #9 =====
+19:51:03  mDNS: From: 10.0.85.2:5353
+19:51:03  mDNS: Size: 33 bytes
+19:51:03  mDNS: DNS Header:
+19:51:03  mDNS:   ID: 0x0000
+19:51:03  mDNS:   Flags: 0x0000
+19:51:03  mDNS:   Type: Query
+19:51:03  mDNS:   Recursion Desired: false
+19:51:03  mDNS:   Truncated: false
+19:51:03  mDNS:   Questions: 1
+19:51:03  mDNS:   Answer RRs: 0
+19:51:03  mDNS:   Authority RRs: 0
+19:51:03  mDNS:   Additional RRs: 0
+19:51:03  mDNS: Questions:
+19:51:03  mDNS:   [0] QNAME: _ftp._tcp.local, QTYPE: PTR (12), QCLASS: 1
+19:51:03  mDNS: ===== End of packet #9 =====
+
+
+
+
+Application finished.

@@ -1,0 +1,1014 @@
+
+[SYSTEM]
+
+deviceName = moduleBox2
+
+[LAN]
+
+LAN_enable = 1;0-disable, 1-enable
+
+DHCP = 1 ;0-disable, 1-enable
+
+ipAdress = 192.168.88.33
+
+netMask = 255.255.255.0
+
+gateWay = 192.168.88.1
+
+
+
+[UDP]
+
+udpServerAdress =
+
+udpServerPort = 0
+
+udpMyPort = 0
+
+cross_link =
+
+
+
+[OSC]
+
+oscServerAdress =
+
+oscServerPort = 0
+
+oscMyPort = 0
+
+
+
+[MQTT]
+
+mqttBrokerAdress = 192.168.88.99
+
+
+
+[SLOT_0]
+
+mode = audioLAN
+
+options = empty
+
+cross_link = empty
+
+
+
+[SLOT_1]
+
+mode = b"
+19:39:05  DEBUG: Start: 516, End: 517, Cursor: 517
+19:39:05  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:39:05  Existing keys in config: [deviceName]
+19:39:05  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:39:05  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:39:05  Existing keys in config: [deviceName]
+19:39:05  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:39:05  DEBUG: Word detected: "bu", length: 2
+19:39:05  DEBUG: Text before cursor: "  ;config file moduleBox. Ver:3.31 
+
+
+
+[SYSTEM]
+
+deviceName = moduleBox2
+
+[LAN]
+
+LAN_enable = 1;0-disable, 1-enable
+
+DHCP = 1 ;0-disable, 1-enable
+
+ipAdress = 192.168.88.33
+
+netMask = 255.255.255.0
+
+gateWay = 192.168.88.1
+
+
+
+[UDP]
+
+udpServerAdress =
+
+udpServerPort = 0
+
+udpMyPort = 0
+
+cross_link =
+
+
+
+[OSC]
+
+oscServerAdress =
+
+oscServerPort = 0
+
+oscMyPort = 0
+
+
+
+[MQTT]
+
+mqttBrokerAdress = 192.168.88.99
+
+
+
+[SLOT_0]
+
+mode = audioLAN
+
+options = empty
+
+cross_link = empty
+
+
+
+[SLOT_1]
+
+mode = bu"
+19:39:05  DEBUG: Start: 516, End: 518, Cursor: 518
+19:39:05  DEBUG: _getAutocompleteSuggestions called with: "bu"
+19:39:05  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:39:05  Existing keys in config: [deviceName]
+19:39:05  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:39:05  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:39:05  Existing keys in config: [deviceName]
+19:39:05  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:39:32  Loading device files from removable drives...
+19:39:32  Searching in Directory: 'D:\'
+19:39:32  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:39:32  Existing keys in config: [deviceName]
+19:39:32  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:39:32  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:39:32  Existing keys in config: [deviceName]
+19:39:32  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:39:32  Searching in Directory: 'D:\System Volume Information'
+19:39:32  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:39:32  Existing keys in config: [deviceName]
+19:39:32  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:39:32  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:39:32  Existing keys in config: [deviceName]
+19:39:32  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:39:32  Loaded manifest file from: D:\manifest-3.311.json (36201 chars)
+19:39:32  Manifest data keys: [config, modes]
+19:39:32  Found config array with 5 items
+19:39:32  Processing chapter: SYSTEM with description: null
+19:39:32  Found 4 values for chapter SYSTEM
+19:39:32  Added key: deviceName
+19:39:32  Added key: statusPeriod
+19:39:32  Added key: statusAllChannels
+19:39:32  Added key: loglevel
+19:39:32  Chapter SYSTEM has keys: [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:39:32  Processing chapter: LAN with description: null
+19:39:32  Found 5 values for chapter LAN
+19:39:32  Added key: LAN_enable
+19:39:32  Added key: DHCP
+19:39:32  Added key: ipAdress
+19:39:32  Added key: netMask
+19:39:32  Added key: gateWay
+19:39:32  Chapter LAN has keys: [LAN_enable, DHCP, ipAdress, netMask, gateWay]
+19:39:32  Processing chapter: UDP with description: null
+19:39:32  Found 3 values for chapter UDP
+19:39:32  Added key: udpServerAdress
+19:39:32  Added key: udpServerPort
+19:39:32  Added key: udpMyPort
+19:39:32  Chapter UDP has keys: [udpServerAdress, udpServerPort, udpMyPort]
+19:39:32  Processing chapter: MQTT with description: null
+19:39:32  Found 1 values for chapter MQTT
+19:39:32  Added key: mqttBrokerAdress
+19:39:32  Chapter MQTT has keys: [mqttBrokerAdress]
+19:39:32  Processing chapter: SLOT_* with description: null
+19:39:32  Found 3 values for chapter SLOT_*
+19:39:32  Added key: mode
+19:39:32  Added key: options
+19:39:32  Added key: cross_link
+19:39:32  Chapter SLOT_* has keys: [mode, options, cross_link]
+19:39:32  Direct match for chapter "SYSTEM"
+19:39:32  Direct match for chapter "LAN"
+19:39:32  Direct match for chapter "UDP"
+19:39:32  Direct match for chapter "MQTT"
+19:39:32  Matched wildcard "SLOT_*" to config chapter "SLOT_0"
+19:39:32  Matched wildcard "SLOT_*" to config chapter "SLOT_1"
+19:39:32  Matched wildcard "SLOT_*" to config chapter "SLOT_2"
+19:39:32  Matched wildcard "SLOT_*" to config chapter "SLOT_3"
+19:39:32  Matched wildcard "SLOT_*" to config chapter "SLOT_4"
+19:39:32  Matched wildcard "SLOT_*" to config chapter "SLOT_5"
+19:39:32  Parsed manifest with 5 chapters: [SYSTEM, LAN, UDP, MQTT, SLOT_*]
+19:39:32  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:39:32  Existing keys in config: [deviceName]
+19:39:32  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:39:32  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:39:32  Existing keys in config: [deviceName]
+19:39:32  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:39:32  Loaded config.ini from: D:\config.ini
+19:39:32  Direct match for chapter "SYSTEM"
+19:39:32  Direct match for chapter "LAN"
+19:39:32  Direct match for chapter "UDP"
+19:39:32  Direct match for chapter "MQTT"
+19:39:32  Matched wildcard "SLOT_*" to config chapter "SLOT_0"
+19:39:32  Matched wildcard "SLOT_*" to config chapter "SLOT_1"
+19:39:32  Matched wildcard "SLOT_*" to config chapter "SLOT_2"
+19:39:32  Matched wildcard "SLOT_*" to config chapter "SLOT_3"
+19:39:32  Matched wildcard "SLOT_*" to config chapter "SLOT_4"
+19:39:32  Matched wildcard "SLOT_*" to config chapter "SLOT_5"
+19:39:32  Parsed config with 12 chapters
+19:39:32  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:39:32  Existing keys in config: [deviceName]
+19:39:32  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:39:32  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:39:32  Existing keys in config: [deviceName]
+19:39:32  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:39:32  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:39:32  Existing keys in config: [deviceName]
+19:39:32  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:39:32  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:39:32  Existing keys in config: [deviceName]
+19:39:32  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:39:40  DEBUG: Word detected: "b", length: 1
+19:39:40  DEBUG: Text before cursor: "  ;config file moduleBox. Ver:3.31 
+
+
+
+[SYSTEM]
+
+deviceName = moduleBox2
+
+[LAN]
+
+LAN_enable = 1;0-disable, 1-enable
+
+DHCP = 1 ;0-disable, 1-enable
+
+ipAdress = 192.168.88.33
+
+netMask = 255.255.255.0
+
+gateWay = 192.168.88.1
+
+
+
+[UDP]
+
+udpServerAdress =
+
+udpServerPort = 0
+
+udpMyPort = 0
+
+cross_link =
+
+
+
+[OSC]
+
+oscServerAdress =
+
+oscServerPort = 0
+
+oscMyPort = 0
+
+
+
+[MQTT]
+
+mqttBrokerAdress = 192.168.88.99
+
+
+
+[SLOT_0]
+
+mode = audioLAN
+
+options = empty
+
+cross_link = empty
+
+
+
+[SLOT_1]
+
+mode = b"
+19:39:40  DEBUG: Start: 516, End: 517, Cursor: 517
+19:39:40  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:39:40  Existing keys in config: [deviceName]
+19:39:40  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:39:40  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:39:40  Existing keys in config: [deviceName]
+19:39:40  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:39:40  DEBUG: Word detected: "bu", length: 2
+19:39:40  DEBUG: Text before cursor: "  ;config file moduleBox. Ver:3.31 
+
+
+
+[SYSTEM]
+
+deviceName = moduleBox2
+
+[LAN]
+
+LAN_enable = 1;0-disable, 1-enable
+
+DHCP = 1 ;0-disable, 1-enable
+
+ipAdress = 192.168.88.33
+
+netMask = 255.255.255.0
+
+gateWay = 192.168.88.1
+
+
+
+[UDP]
+
+udpServerAdress =
+
+udpServerPort = 0
+
+udpMyPort = 0
+
+cross_link =
+
+
+
+[OSC]
+
+oscServerAdress =
+
+oscServerPort = 0
+
+oscMyPort = 0
+
+
+
+[MQTT]
+
+mqttBrokerAdress = 192.168.88.99
+
+
+
+[SLOT_0]
+
+mode = audioLAN
+
+options = empty
+
+cross_link = empty
+
+
+
+[SLOT_1]
+
+mode = bu"
+19:39:40  DEBUG: Start: 516, End: 518, Cursor: 518
+19:39:40  DEBUG: _getAutocompleteSuggestions called with: "bu"
+19:39:40  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:39:40  Existing keys in config: [deviceName]
+19:39:40  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:39:40  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:39:40  Existing keys in config: [deviceName]
+19:39:40  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:39:59  Starting discovery…
+19:39:59  Serial: 5 port(s) detected.
+19:39:59  Serial: sent probe to COM1
+19:39:59  UDP: Getting network interfaces...
+19:39:59  UDP: Found 2 network interface(s)
+19:39:59  UDP: Processing interface Ethernet with address 192.168.88.126
+19:39:59  UDP: broadcast packet 1/3 sent from Ethernet (192.168.88.126) to 192.168.88.255:9000
+19:39:59  UDP: broadcast packet 2/3 sent from Ethernet (192.168.88.126) to 192.168.88.255:9000
+19:40:00  UDP: broadcast packet 3/3 sent from Ethernet (192.168.88.126) to 192.168.88.255:9000
+19:40:00  UDP: Processing interface outline-tap0 with address 10.0.85.2
+19:40:00  UDP: broadcast packet 1/3 sent from outline-tap0 (10.0.85.2) to 10.255.255.255:9000
+19:40:00  UDP: broadcast packet 2/3 sent from outline-tap0 (10.0.85.2) to 10.255.255.255:9000
+19:40:00  UDP: broadcast packet 3/3 sent from outline-tap0 (10.0.85.2) to 10.255.255.255:9000
+19:40:00  UDP: Waiting for responses...
+19:40:01  Serial: timeout waiting response on COM1
+19:40:01  Serial: cannot open COM21
+19:40:01  Serial: sent probe to COM0
+19:40:02  UDP: scan finished. Found 0 device(s) across 2 interface(s).
+19:40:03  Serial: timeout waiting response on COM0
+19:40:03  Serial: sent probe to COM59
+19:40:03  Serial: device "moduleBox2" on COM59
+19:40:03  Serial: sent probe to COM59
+19:40:03  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:40:03  Existing keys in config: [deviceName]
+19:40:03  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:40:03  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:40:03  Existing keys in config: [deviceName]
+19:40:03  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:40:03  Serial: device "moduleBox2" on COM59
+19:40:03  Serial: scan finished.
+19:40:03  Discovery complete. Found 1 device(s).
+19:40:03  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:40:03  Existing keys in config: [deviceName]
+19:40:03  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:40:03  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:40:03  Existing keys in config: [deviceName]
+19:40:03  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:40:06  DEBUG: Replacing text from 516 to 518 (current word: "bu") with "button_0"
+19:40:06  DEBUG: Final replacement: "button_0" from 516 to 518
+19:40:06  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:40:06  Existing keys in config: [deviceName]
+19:40:06  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:40:06  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:40:06  Existing keys in config: [deviceName]
+19:40:06  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:40:06  DEBUG: Word detected: "button_0", length: 8
+19:40:06  DEBUG: Text before cursor: "  ;config file moduleBox. Ver:3.31 
+
+
+
+[SYSTEM]
+
+deviceName = moduleBox2
+
+[LAN]
+
+LAN_enable = 1;0-disable, 1-enable
+
+DHCP = 1 ;0-disable, 1-enable
+
+ipAdress = 192.168.88.33
+
+netMask = 255.255.255.0
+
+gateWay = 192.168.88.1
+
+
+
+[UDP]
+
+udpServerAdress =
+
+udpServerPort = 0
+
+udpMyPort = 0
+
+cross_link =
+
+
+
+[OSC]
+
+oscServerAdress =
+
+oscServerPort = 0
+
+oscMyPort = 0
+
+
+
+[MQTT]
+
+mqttBrokerAdress = 192.168.88.99
+
+
+
+[SLOT_0]
+
+mode = audioLAN
+
+options = empty
+
+cross_link = empty
+
+
+
+[SLOT_1]
+
+mode = button_0"
+19:40:06  DEBUG: Start: 516, End: 524, Cursor: 524
+19:40:06  DEBUG: _getAutocompleteSuggestions called with: "button_0"
+19:40:06  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:40:06  Existing keys in config: [deviceName]
+19:40:06  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:40:06  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:40:06  Existing keys in config: [deviceName]
+19:40:06  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:40:47  Loading device files from removable drives...
+19:40:47  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:40:47  Existing keys in config: [deviceName]
+19:40:47  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:40:47  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:40:47  Existing keys in config: [deviceName]
+19:40:47  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:40:47  Searching in Directory: 'D:\'
+19:40:47  Searching in Directory: 'D:\System Volume Information'
+19:40:47  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:40:47  Existing keys in config: [deviceName]
+19:40:47  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:40:47  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:40:47  Existing keys in config: [deviceName]
+19:40:47  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:40:47  Loaded manifest file from: D:\manifest-3.311.json (36201 chars)
+19:40:47  Manifest data keys: [config, modes]
+19:40:47  Found config array with 5 items
+19:40:47  Processing chapter: SYSTEM with description: null
+19:40:47  Found 4 values for chapter SYSTEM
+19:40:47  Added key: deviceName
+19:40:47  Added key: statusPeriod
+19:40:47  Added key: statusAllChannels
+19:40:47  Added key: loglevel
+19:40:47  Chapter SYSTEM has keys: [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:40:47  Processing chapter: LAN with description: null
+19:40:47  Found 5 values for chapter LAN
+19:40:47  Added key: LAN_enable
+19:40:47  Added key: DHCP
+19:40:47  Added key: ipAdress
+19:40:47  Added key: netMask
+19:40:47  Added key: gateWay
+19:40:47  Chapter LAN has keys: [LAN_enable, DHCP, ipAdress, netMask, gateWay]
+19:40:47  Processing chapter: UDP with description: null
+19:40:47  Found 3 values for chapter UDP
+19:40:47  Added key: udpServerAdress
+19:40:47  Added key: udpServerPort
+19:40:47  Added key: udpMyPort
+19:40:47  Chapter UDP has keys: [udpServerAdress, udpServerPort, udpMyPort]
+19:40:47  Processing chapter: MQTT with description: null
+19:40:47  Found 1 values for chapter MQTT
+19:40:47  Added key: mqttBrokerAdress
+19:40:47  Chapter MQTT has keys: [mqttBrokerAdress]
+19:40:47  Processing chapter: SLOT_* with description: null
+19:40:47  Found 3 values for chapter SLOT_*
+19:40:47  Added key: mode
+19:40:47  Added key: options
+19:40:47  Added key: cross_link
+19:40:47  Chapter SLOT_* has keys: [mode, options, cross_link]
+19:40:47  Direct match for chapter "SYSTEM"
+19:40:47  Direct match for chapter "LAN"
+19:40:47  Direct match for chapter "UDP"
+19:40:47  Direct match for chapter "MQTT"
+19:40:47  Matched wildcard "SLOT_*" to config chapter "SLOT_0"
+19:40:47  Matched wildcard "SLOT_*" to config chapter "SLOT_1"
+19:40:47  Matched wildcard "SLOT_*" to config chapter "SLOT_2"
+19:40:47  Matched wildcard "SLOT_*" to config chapter "SLOT_3"
+19:40:47  Matched wildcard "SLOT_*" to config chapter "SLOT_4"
+19:40:47  Matched wildcard "SLOT_*" to config chapter "SLOT_5"
+19:40:47  Parsed manifest with 5 chapters: [SYSTEM, LAN, UDP, MQTT, SLOT_*]
+19:40:47  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:40:47  Existing keys in config: [deviceName]
+19:40:47  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:40:47  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:40:47  Existing keys in config: [deviceName]
+19:40:47  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:40:47  Loaded config.ini from: D:\config.ini
+19:40:47  Direct match for chapter "SYSTEM"
+19:40:47  Direct match for chapter "LAN"
+19:40:47  Direct match for chapter "UDP"
+19:40:47  Direct match for chapter "MQTT"
+19:40:47  Matched wildcard "SLOT_*" to config chapter "SLOT_0"
+19:40:47  Matched wildcard "SLOT_*" to config chapter "SLOT_1"
+19:40:47  Matched wildcard "SLOT_*" to config chapter "SLOT_2"
+19:40:47  Matched wildcard "SLOT_*" to config chapter "SLOT_3"
+19:40:47  Matched wildcard "SLOT_*" to config chapter "SLOT_4"
+19:40:47  Matched wildcard "SLOT_*" to config chapter "SLOT_5"
+19:40:47  Parsed config with 12 chapters
+19:40:47  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:40:47  Existing keys in config: [deviceName]
+19:40:47  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:40:47  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:40:47  Existing keys in config: [deviceName]
+19:40:47  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:40:47  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:40:47  Existing keys in config: [deviceName]
+19:40:47  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:40:47  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:40:47  Existing keys in config: [deviceName]
+19:40:47  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:40:54  DEBUG: Word detected: "bu", length: 2
+19:40:54  DEBUG: Text before cursor: "  ;config file moduleBox. Ver:3.31 
+
+
+
+[SYSTEM]
+
+deviceName = moduleBox2
+
+[LAN]
+
+LAN_enable = 1;0-disable, 1-enable
+
+DHCP = 1 ;0-disable, 1-enable
+
+ipAdress = 192.168.88.33
+
+netMask = 255.255.255.0
+
+gateWay = 192.168.88.1
+
+
+
+[UDP]
+
+udpServerAdress =
+
+udpServerPort = 0
+
+udpMyPort = 0
+
+cross_link =
+
+
+
+[OSC]
+
+oscServerAdress =
+
+oscServerPort = 0
+
+oscMyPort = 0
+
+
+
+[MQTT]
+
+mqttBrokerAdress = 192.168.88.99
+
+
+
+[SLOT_0]
+
+mode = audioLAN
+
+options = empty
+
+cross_link = empty
+
+
+
+[SLOT_1]
+
+mode = bu"
+19:40:54  DEBUG: Start: 516, End: 518, Cursor: 518
+19:40:54  DEBUG: _getAutocompleteSuggestions called with: "bu"
+19:40:54  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:40:54  Existing keys in config: [deviceName]
+19:40:54  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:40:54  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:40:54  Existing keys in config: [deviceName]
+19:40:54  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:41:03  DEBUG: Word detected: "b", length: 1
+19:41:03  DEBUG: Text before cursor: "  ;config file moduleBox. Ver:3.31 
+
+
+
+[SYSTEM]
+
+deviceName = moduleBox2
+
+[LAN]
+
+LAN_enable = 1;0-disable, 1-enable
+
+DHCP = 1 ;0-disable, 1-enable
+
+ipAdress = 192.168.88.33
+
+netMask = 255.255.255.0
+
+gateWay = 192.168.88.1
+
+
+
+[UDP]
+
+udpServerAdress =
+
+udpServerPort = 0
+
+udpMyPort = 0
+
+cross_link =
+
+
+
+[OSC]
+
+oscServerAdress =
+
+oscServerPort = 0
+
+oscMyPort = 0
+
+
+
+[MQTT]
+
+mqttBrokerAdress = 192.168.88.99
+
+
+
+[SLOT_0]
+
+mode = audioLAN
+
+options = empty
+
+cross_link = empty
+
+
+
+[SLOT_1]
+
+mode = b"
+19:41:03  DEBUG: Start: 516, End: 517, Cursor: 517
+19:41:03  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:41:03  Existing keys in config: [deviceName]
+19:41:03  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:41:03  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:41:03  Existing keys in config: [deviceName]
+19:41:03  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:41:03  DEBUG: Word detected: "", length: 0
+19:41:03  DEBUG: Text before cursor: "  ;config file moduleBox. Ver:3.31 
+
+
+
+[SYSTEM]
+
+deviceName = moduleBox2
+
+[LAN]
+
+LAN_enable = 1;0-disable, 1-enable
+
+DHCP = 1 ;0-disable, 1-enable
+
+ipAdress = 192.168.88.33
+
+netMask = 255.255.255.0
+
+gateWay = 192.168.88.1
+
+
+
+[UDP]
+
+udpServerAdress =
+
+udpServerPort = 0
+
+udpMyPort = 0
+
+cross_link =
+
+
+
+[OSC]
+
+oscServerAdress =
+
+oscServerPort = 0
+
+oscMyPort = 0
+
+
+
+[MQTT]
+
+mqttBrokerAdress = 192.168.88.99
+
+
+
+[SLOT_0]
+
+mode = audioLAN
+
+options = empty
+
+cross_link = empty
+
+
+
+[SLOT_1]
+
+mode = "
+19:41:03  DEBUG: Start: 516, End: 516, Cursor: 516
+19:41:03  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:41:03  Existing keys in config: [deviceName]
+19:41:03  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:41:03  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:41:03  Existing keys in config: [deviceName]
+19:41:03  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:41:07  DEBUG: Word detected: "b", length: 1
+19:41:07  DEBUG: Text before cursor: "  ;config file moduleBox. Ver:3.31 
+
+
+
+[SYSTEM]
+
+deviceName = moduleBox2
+
+[LAN]
+
+LAN_enable = 1;0-disable, 1-enable
+
+DHCP = 1 ;0-disable, 1-enable
+
+ipAdress = 192.168.88.33
+
+netMask = 255.255.255.0
+
+gateWay = 192.168.88.1
+
+
+
+[UDP]
+
+udpServerAdress =
+
+udpServerPort = 0
+
+udpMyPort = 0
+
+cross_link =
+
+
+
+[OSC]
+
+oscServerAdress =
+
+oscServerPort = 0
+
+oscMyPort = 0
+
+
+
+[MQTT]
+
+mqttBrokerAdress = 192.168.88.99
+
+
+
+[SLOT_0]
+
+mode = audioLAN
+
+options = empty
+
+cross_link = empty
+
+
+
+[SLOT_1]
+
+mode =
+
+options = b"
+19:41:07  DEBUG: Start: 529, End: 530, Cursor: 530
+19:41:07  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:41:07  Existing keys in config: [deviceName]
+19:41:07  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:41:07  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:41:07  Existing keys in config: [deviceName]
+19:41:07  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:41:07  DEBUG: Word detected: "bu", length: 2
+19:41:07  DEBUG: Text before cursor: "  ;config file moduleBox. Ver:3.31 
+
+
+
+[SYSTEM]
+
+deviceName = moduleBox2
+
+[LAN]
+
+LAN_enable = 1;0-disable, 1-enable
+
+DHCP = 1 ;0-disable, 1-enable
+
+ipAdress = 192.168.88.33
+
+netMask = 255.255.255.0
+
+gateWay = 192.168.88.1
+
+
+
+[UDP]
+
+udpServerAdress =
+
+udpServerPort = 0
+
+udpMyPort = 0
+
+cross_link =
+
+
+
+[OSC]
+
+oscServerAdress =
+
+oscServerPort = 0
+
+oscMyPort = 0
+
+
+
+[MQTT]
+
+mqttBrokerAdress = 192.168.88.99
+
+
+
+[SLOT_0]
+
+mode = audioLAN
+
+options = empty
+
+cross_link = empty
+
+
+
+[SLOT_1]
+
+mode =
+
+options = bu"
+19:41:07  DEBUG: Start: 529, End: 531, Cursor: 531
+19:41:07  DEBUG: _getAutocompleteSuggestions called with: "bu"
+19:41:07  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:41:07  Existing keys in config: [deviceName]
+19:41:07  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:41:07  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:41:07  Existing keys in config: [deviceName]
+19:41:07  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:41:21  Starting discovery…
+19:41:21  Serial: 5 port(s) detected.
+19:41:21  Serial: sent probe to COM1
+19:41:21  UDP: Getting network interfaces...
+19:41:21  UDP: Found 2 network interface(s)
+19:41:21  UDP: Processing interface Ethernet with address 192.168.88.126
+19:41:21  UDP: broadcast packet 1/3 sent from Ethernet (192.168.88.126) to 192.168.88.255:9000
+19:41:21  UDP: broadcast packet 2/3 sent from Ethernet (192.168.88.126) to 192.168.88.255:9000
+19:41:21  UDP: broadcast packet 3/3 sent from Ethernet (192.168.88.126) to 192.168.88.255:9000
+19:41:21  UDP: Processing interface outline-tap0 with address 10.0.85.2
+19:41:21  UDP: broadcast packet 1/3 sent from outline-tap0 (10.0.85.2) to 10.255.255.255:9000
+19:41:22  UDP: broadcast packet 2/3 sent from outline-tap0 (10.0.85.2) to 10.255.255.255:9000
+19:41:22  UDP: broadcast packet 3/3 sent from outline-tap0 (10.0.85.2) to 10.255.255.255:9000
+19:41:22  UDP: Waiting for responses...
+19:41:23  Serial: timeout waiting response on COM1
+19:41:23  Serial: cannot open COM21
+19:41:23  Serial: sent probe to COM0
+19:41:24  UDP: scan finished. Found 0 device(s) across 2 interface(s).
+19:41:25  Serial: timeout waiting response on COM0
+19:41:25  Serial: sent probe to COM59
+19:41:25  Serial: device "moduleBox2" on COM59
+19:41:25  Serial: sent probe to COM59
+19:41:25  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:41:25  Existing keys in config: [deviceName]
+19:41:25  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:41:25  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:41:25  Existing keys in config: [deviceName]
+19:41:25  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:41:25  Serial: device "moduleBox2" on COM59
+19:41:25  Serial: scan finished.
+19:41:25  Discovery complete. Found 1 device(s).
+19:41:25  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:41:25  Existing keys in config: [deviceName]
+19:41:25  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:41:25  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:41:25  Existing keys in config: [deviceName]
+19:41:25  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:41:34  Starting discovery…
+19:41:34  Serial: 5 port(s) detected.
+19:41:34  Serial: sent probe to COM1
+19:41:34  UDP: Getting network interfaces...
+19:41:34  UDP: Found 2 network interface(s)
+19:41:34  UDP: Processing interface Ethernet with address 192.168.88.126
+19:41:34  UDP: broadcast packet 1/3 sent from Ethernet (192.168.88.126) to 192.168.88.255:9000
+19:41:34  UDP: broadcast packet 2/3 sent from Ethernet (192.168.88.126) to 192.168.88.255:9000
+19:41:35  UDP: broadcast packet 3/3 sent from Ethernet (192.168.88.126) to 192.168.88.255:9000
+19:41:35  UDP: Processing interface outline-tap0 with address 10.0.85.2
+19:41:35  UDP: broadcast packet 1/3 sent from outline-tap0 (10.0.85.2) to 10.255.255.255:9000
+19:41:35  UDP: broadcast packet 2/3 sent from outline-tap0 (10.0.85.2) to 10.255.255.255:9000
+19:41:35  UDP: broadcast packet 3/3 sent from outline-tap0 (10.0.85.2) to 10.255.255.255:9000
+19:41:35  UDP: Waiting for responses...
+19:41:36  Serial: timeout waiting response on COM1
+19:41:36  Serial: cannot open COM21
+19:41:36  Serial: sent probe to COM0
+19:41:37  UDP: scan finished. Found 0 device(s) across 2 interface(s).
+19:41:38  Serial: timeout waiting response on COM0
+19:41:38  Serial: sent probe to COM59
+19:41:38  Serial: device "moduleBox2" on COM59
+19:41:38  Serial: sent probe to COM59
+19:41:38  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:41:38  Existing keys in config: [deviceName]
+19:41:38  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:41:38  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:41:38  Existing keys in config: [deviceName]
+19:41:38  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:41:38  Serial: device "moduleBox2" on COM59
+19:41:39  Serial: scan finished.
+19:41:39  Discovery complete. Found 1 device(s).
+19:41:39  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:41:39  Existing keys in config: [deviceName]
+19:41:39  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
+19:41:39  Available keys for chapter "SYSTEM" (from manifest "SYSTEM"): [deviceName, statusPeriod, statusAllChannels, loglevel]
+19:41:39  Existing keys in config: [deviceName]
+19:41:39  Filtered available keys (excluding SLOT_*): [statusPeriod, statusAllChannels, loglevel]
