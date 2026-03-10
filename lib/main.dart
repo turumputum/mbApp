@@ -127,6 +127,48 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   late final TabController _detailsTabControllerSerial;
   late final TabController _detailsTabControllerMdns;
   int _currentDetailsTabIndex = 0;
+
+  /// Status bar: short message and optional progress (null = indeterminate, 0.0..1.0 = value)
+  String _statusMessage = '';
+  double? _statusProgress;
+
+  void _setStatus(String message, [double? progress]) {
+    if (!mounted) return;
+    setState(() {
+      _statusMessage = message;
+      _statusProgress = progress;
+    });
+  }
+
+  void _clearStatus() {
+    if (!mounted) return;
+    setState(() {
+      _statusMessage = '';
+      _statusProgress = null;
+    });
+  }
+
+  /// Clear config/edit and design tab content (e.g. before switching device type filter)
+  void _clearConfigTabContent() {
+    for (final TextEditingController c in _configControllers.values) {
+      c.dispose();
+    }
+    _configControllers.clear();
+    _cachedConfigPath = null;
+    _cachedConfigContent = null;
+    _cachedManifestPath = null;
+    _cachedManifestContent = null;
+    _parsedConfig.clear();
+    _originalParsedConfig.clear();
+    _configEditorController.clear();
+    _selectedChapter = null;
+    _isConfigEditorDirty = false;
+    _isConfigDesignDirty = false;
+    _manifestData = {};
+    _availableKeys = {};
+    _chapterDescriptions = {};
+    _chapterWildcards = {};
+  }
   
   // Manifest parsing for key suggestions
   Map<String, dynamic> _manifestData = {};
@@ -1793,18 +1835,44 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                             ),
                           ],
                           selected: <DeviceListFilter>{_deviceListFilter},
-                          onSelectionChanged: (Set<DeviceListFilter> selected) {
-                            if (selected.isNotEmpty && selected.first != _deviceListFilter) {
-                              setState(() {
-                                _deviceListFilter = selected.first;
-                                if (!_displayedDevices.contains(_selected)) {
-                                  _selected = _displayedDevices.isNotEmpty
-                                      ? _displayedDevices.first
-                                      : null;
-                                  _currentDetailsTabIndex = 0;
-                                }
-                              });
+                          onSelectionChanged: (Set<DeviceListFilter> selected) async {
+                            if (selected.isEmpty || selected.first == _deviceListFilter) return;
+                            final DeviceListFilter newFilter = selected.first;
+                            final String filterName = newFilter == DeviceListFilter.serial ? 'Serial' : 'mDNS';
+                            if (_isConfigEditorDirty || _isConfigDesignDirty) {
+                              final bool? discard = await showDialog<bool>(
+                                context: context,
+                                builder: (BuildContext ctx) => AlertDialog(
+                                  title: const Text('Unsaved changes'),
+                                  content: Text(
+                                    'Config edit or Config design has unsaved changes. '
+                                    'Discard them and switch to $filterName?',
+                                  ),
+                                  actions: <Widget>[
+                                    TextButton(
+                                      onPressed: () => Navigator.of(ctx).pop(false),
+                                      child: const Text('Cancel'),
+                                    ),
+                                    FilledButton(
+                                      onPressed: () => Navigator.of(ctx).pop(true),
+                                      child: const Text('Discard and switch'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                              if (discard != true || !mounted) return;
                             }
+                            if (!mounted) return;
+                            _clearConfigTabContent();
+                            setState(() {
+                              _deviceListFilter = newFilter;
+                              if (!_displayedDevices.contains(_selected)) {
+                                _selected = _displayedDevices.isNotEmpty
+                                    ? _displayedDevices.first
+                                    : null;
+                                _currentDetailsTabIndex = 0;
+                              }
+                            });
                           },
                         ),
                       ),
@@ -1846,6 +1914,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               ],
             ),
           ),
+          _buildStatusBar(),
         ],
       ),
       // Debug view for scroll offset (hidden)
@@ -1891,6 +1960,39 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       //   ),
       // ),
     ]));
+  }
+
+  Widget _buildStatusBar() {
+    final bool showProgress = _statusMessage.isNotEmpty;
+    return Container(
+      height: 28,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.6),
+        border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
+      ),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: Text(
+              _statusMessage.isEmpty ? ' ' : _statusMessage,
+              style: Theme.of(context).textTheme.bodySmall,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (showProgress) ...[
+            const SizedBox(width: 12),
+            SizedBox(
+              width: 120,
+              height: 6,
+              child: _statusProgress != null
+                  ? LinearProgressIndicator(value: _statusProgress)
+                  : const LinearProgressIndicator(),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   Widget _buildDetailsView() {
@@ -4307,6 +4409,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _cachedConfigContent = null;
     _cachedManifestPath = null;
     _cachedConfigPath = null;
+    _setStatus('Loading...', 0);
 
     try {
       // For Windows serial devices: find drive by volume label first (one-time operation)
@@ -4347,7 +4450,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           _log('Windows: Using cached drive path $windowsDrivePath');
         }
       }
-      
+
+      _setStatus('Searching for manifest...', 0.2);
       // Search for manifest-*.json files
       String? manifestPath;
       if (windowsDrivePath != null) {
@@ -4370,6 +4474,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _log('No manifest-*.json files found on removable drives');
       }
 
+      _setStatus('Loading config...', 0.5);
       // Search for config.ini on the same drive as manifest
       String? configPath;
       if (windowsDrivePath != null) {
@@ -4400,7 +4505,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _cachedConfigContent = _cachedConfigContent!.replaceAll('\r\n', '\n');
         _log('Loaded config.ini from: $configPath');
         _parseConfigFile(_cachedConfigContent!);
-        
+
         // Initialize the text editor with the loaded content
         _synchronizeEditorWithCachedContent();
         // Rebuild cached suggestions with new config data
@@ -4408,8 +4513,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       } else {
         _log('config.ini not found on removable drives');
       }
+      _setStatus('Ready', 1.0);
     } catch (e) {
       _log('Error loading device files: $e');
+      _setStatus('Error: ${e.toString().split('\n').first}', null);
+    } finally {
+      if (mounted) {
+        Future.delayed(const Duration(milliseconds: 800), () {
+          if (mounted) _clearStatus();
+        });
+      }
     }
   }
 
@@ -4419,24 +4532,28 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _cachedConfigContent = null;
     _cachedManifestPath = null;
     _cachedConfigPath = null;
+    _setStatus('Connecting to FTP...', 0);
 
     try {
       // Extract IP address from device identifier (format: "ip:port")
       final String deviceIp = mdnsDevice.identifier.split(':')[0];
-      
+
       _log('FTP: Connecting to $deviceIp:21 as anonymous');
-      
+
       // Create FTP connection with simple settings
       final FTPConnect ftpConnect = FTPConnect(deviceIp, port: 21, user: 'anonymous', pass: '');
       final bool connected = await ftpConnect.connect();
-      
+
       if (!connected) {
         _log('FTP: Failed to connect to $deviceIp:21');
+        _setStatus('FTP connection failed', null);
+        if (mounted) Future.delayed(const Duration(seconds: 2), _clearStatus);
         return;
       }
       
       _log('FTP: Successfully connected to $deviceIp:21');
-      
+      _setStatus('Loading manifest...', 0.2);
+
       // Try different transfer modes if passive fails
       try {
         ftpConnect.transferMode = TransferMode.passive;
@@ -4512,6 +4629,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         }
       }
 
+      _setStatus('Loading config...', 0.6);
       try {
         // Load config.ini from FTP
         final File tempConfigFile = File('./temp_config.ini');
@@ -4546,9 +4664,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         await ftpConnect.disconnect();
         _log('FTP: Disconnected from server');
       } catch (_) {}
-      
+
+      _setStatus('Ready', 1.0);
     } catch (e) {
       _log('FTP: Error loading device files: $e');
+      _setStatus('FTP error: ${e.toString().split('\n').first}', null);
+    } finally {
+      if (mounted) {
+        Future.delayed(const Duration(milliseconds: 800), () {
+          if (mounted) _clearStatus();
+        });
+      }
     }
   }
 
