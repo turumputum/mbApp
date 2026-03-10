@@ -42,6 +42,9 @@ class ModuleBoxApp extends StatelessWidget {
   }
 }
 
+/// Filter for device list: show only Serial or only mDNS
+enum DeviceListFilter { serial, mdns }
+
 class DeviceItem {
   DeviceItem({
     required this.displayName,
@@ -63,8 +66,15 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
+class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   final List<DeviceItem> _devices = <DeviceItem>[];
+  DeviceListFilter _deviceListFilter = DeviceListFilter.serial;
+  List<DeviceItem> get _displayedDevices => _devices
+      .where((DeviceItem d) =>
+          _deviceListFilter == DeviceListFilter.serial
+              ? d.kind == 'serial'
+              : d.kind == 'mDNS')
+      .toList();
   DeviceItem? _selected;
   bool _isScanning = false;
   final ScrollController _suggestionScrollController = ScrollController();
@@ -114,7 +124,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   bool _isConfigDesignDirty = false;
   bool _suspendEditorDirtyTracking = false;
   bool _suspendDesignDirtyTracking = false;
-  late final TabController _detailsTabController;
+  late final TabController _detailsTabControllerSerial;
+  late final TabController _detailsTabControllerMdns;
   int _currentDetailsTabIndex = 0;
   
   // Manifest parsing for key suggestions
@@ -168,8 +179,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   @override
   void initState() {
     super.initState();
-    _detailsTabController = TabController(length: 3, vsync: this);
-    _detailsTabController.addListener(_handleDetailsTabChange);
+    _detailsTabControllerSerial = TabController(length: 3, vsync: this);
+    _detailsTabControllerMdns = TabController(length: 2, vsync: this);
+    _detailsTabControllerSerial.addListener(_handleDetailsTabChangeSerial);
+    _detailsTabControllerMdns.addListener(_handleDetailsTabChangeMdns);
     _setupAutocompleteListener();
     _setupConsoleAutocompleteListener();
     _startBackgroundScanning();
@@ -979,14 +992,21 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     });
   }
 
-  void _handleDetailsTabChange() {
-    if (!_detailsTabController.indexIsChanging && _detailsTabController.index != _currentDetailsTabIndex) {
-      _currentDetailsTabIndex = _detailsTabController.index;
-      if (_currentDetailsTabIndex == 0) {
-        _syncEditorFromParsedConfig();
-      } else if (_currentDetailsTabIndex == 1) {
-        _refreshParsedConfigFromEditor();
-      }
+  void _handleDetailsTabChangeSerial() {
+    if (!_detailsTabControllerSerial.indexIsChanging &&
+        _detailsTabControllerSerial.index != _currentDetailsTabIndex) {
+      _currentDetailsTabIndex = _detailsTabControllerSerial.index;
+      if (_currentDetailsTabIndex == 0) _syncEditorFromParsedConfig();
+      else if (_currentDetailsTabIndex == 1) _refreshParsedConfigFromEditor();
+    }
+  }
+
+  void _handleDetailsTabChangeMdns() {
+    if (!_detailsTabControllerMdns.indexIsChanging &&
+        _detailsTabControllerMdns.index != _currentDetailsTabIndex) {
+      _currentDetailsTabIndex = _detailsTabControllerMdns.index;
+      if (_currentDetailsTabIndex == 0) _syncEditorFromParsedConfig();
+      else if (_currentDetailsTabIndex == 1) _refreshParsedConfigFromEditor();
     }
   }
 
@@ -1757,12 +1777,43 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                       ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        child: SegmentedButton<DeviceListFilter>(
+                          segments: <ButtonSegment<DeviceListFilter>>[
+                            ButtonSegment<DeviceListFilter>(
+                              value: DeviceListFilter.serial,
+                              label: const Text('Serial'),
+                              icon: const Icon(Icons.usb),
+                            ),
+                            ButtonSegment<DeviceListFilter>(
+                              value: DeviceListFilter.mdns,
+                              label: const Text('mDNS'),
+                              icon: const Icon(Icons.wifi_find),
+                            ),
+                          ],
+                          selected: <DeviceListFilter>{_deviceListFilter},
+                          onSelectionChanged: (Set<DeviceListFilter> selected) {
+                            if (selected.isNotEmpty && selected.first != _deviceListFilter) {
+                              setState(() {
+                                _deviceListFilter = selected.first;
+                                if (!_displayedDevices.contains(_selected)) {
+                                  _selected = _displayedDevices.isNotEmpty
+                                      ? _displayedDevices.first
+                                      : null;
+                                  _currentDetailsTabIndex = 0;
+                                }
+                              });
+                            }
+                          },
+                        ),
+                      ),
                       const Divider(height: 1),
                       Expanded(
                         child: ListView.builder(
-                          itemCount: _devices.length,
+                          itemCount: _displayedDevices.length,
                           itemBuilder: (BuildContext context, int index) {
-                            final DeviceItem item = _devices[index];
+                            final DeviceItem item = _displayedDevices[index];
                             final bool selected = identical(_selected, item);
                             return ListTile(
                               title: Text(item.displayName),
@@ -1773,12 +1824,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                               onTap: () {
                                 setState(() {
                                   _selected = item;
+                                  if (item.kind == 'mDNS') _currentDetailsTabIndex = 0;
                                 });
-                                 // Load files based on device type
                                 if (item.kind == 'serial') {
                                   _loadDeviceFiles();
-                                 } else if (item.kind == 'mDNS') {
-                                   _loadDeviceFilesFromFtp(item);
+                                } else if (item.kind == 'mDNS') {
+                                  _loadDeviceFilesFromFtp(item);
                                 }
                               },
                             );
@@ -1847,6 +1898,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     if (item == null) {
       return const Center(child: Text('Select a device to see details'));
     }
+    final bool isSerial = item.kind == 'serial';
+    final TabController tabController =
+        isSerial ? _detailsTabControllerSerial : _detailsTabControllerMdns;
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -1858,22 +1912,32 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           Text('Identifier: ${item.identifier}'),
           const SizedBox(height: 8),
           TabBar(
-            controller: _detailsTabController,
-            tabs: const <Widget>[
-              Tab(text: 'Config edit'),
-              Tab(text: 'Config desig'),
-              Tab(text: 'Console'),
-            ],
+            controller: tabController,
+            tabs: isSerial
+                ? const <Widget>[
+                    Tab(text: 'Config edit'),
+                    Tab(text: 'Config desig'),
+                    Tab(text: 'Console'),
+                  ]
+                : const <Widget>[
+                    Tab(text: 'Config edit'),
+                    Tab(text: 'Config desig'),
+                  ],
           ),
           const SizedBox(height: 8),
           Expanded(
             child: TabBarView(
-              controller: _detailsTabController,
-              children: <Widget>[
-                _buildConfigEditTab(item),
-                _buildConfigDesignTab(item),
-                _buildConsoleTab(item),
-              ],
+              controller: tabController,
+              children: isSerial
+                  ? <Widget>[
+                      _buildConfigEditTab(item),
+                      _buildConfigDesignTab(item),
+                      _buildConsoleTab(item),
+                    ]
+                  : <Widget>[
+                      _buildConfigEditTab(item),
+                      _buildConfigDesignTab(item),
+                    ],
             ),
           ),
         ],
@@ -3835,7 +3899,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       controller.dispose();
     }
     _configControllers.clear();
-    _detailsTabController.dispose();
+    _detailsTabControllerSerial.dispose();
+    _detailsTabControllerMdns.dispose();
     // Close mDNS socket
     _mdnsSocketSubscription?.cancel();
     _mdnsSocket?.close();
