@@ -132,6 +132,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   String _statusMessage = '';
   double? _statusProgress;
 
+  /// Saved FTP credentials per device (key: device identifier "ip:port")
+  final Map<String, ({String user, String password})> _ftpCredentialsByDevice = {};
+
   void _setStatus(String message, [double? progress]) {
     if (!mounted) return;
     setState(() {
@@ -146,6 +149,71 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _statusMessage = '';
       _statusProgress = null;
     });
+  }
+
+  /// Show FTP login dialog; returns (user, password) or null if cancelled
+  Future<({String user, String password})?> _showFtpLoginDialog(String host, String deviceName) async {
+    final TextEditingController userController = TextEditingController();
+    final TextEditingController passController = TextEditingController();
+    final result = await showDialog<({String user, String password})>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext ctx) {
+        return AlertDialog(
+          title: const Text('FTP login'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text('Server: $host'),
+                if (deviceName.isNotEmpty) Text('Device: $deviceName'),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: userController,
+                  decoration: const InputDecoration(
+                    labelText: 'Login',
+                    border: OutlineInputBorder(),
+                  ),
+                  textInputAction: TextInputAction.next,
+                  autofocus: true,
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: passController,
+                  decoration: const InputDecoration(
+                    labelText: 'Password',
+                    border: OutlineInputBorder(),
+                  ),
+                  obscureText: true,
+                  onSubmitted: (_) => Navigator.of(ctx).pop((
+                    user: userController.text.trim(),
+                    password: passController.text,
+                  )),
+                ),
+              ],
+            ),
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(null),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final String user = userController.text.trim();
+                if (user.isEmpty) return;
+                Navigator.of(ctx).pop((user: user, password: passController.text));
+              },
+              child: const Text('Login'),
+            ),
+          ],
+        );
+      },
+    );
+    userController.dispose();
+    passController.dispose();
+    return result;
   }
 
   /// Clear config/edit and design tab content (e.g. before switching device type filter)
@@ -4573,138 +4641,190 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _cachedConfigPath = null;
     _setStatus('Connecting to FTP...', 0);
 
+    final String deviceKey = mdnsDevice.identifier;
+    final String deviceIp = mdnsDevice.identifier.split(':')[0];
+
     try {
-      // Extract IP address from device identifier (format: "ip:port")
-      final String deviceIp = mdnsDevice.identifier.split(':')[0];
-
-      _log('FTP: Connecting to $deviceIp:21 as anonymous');
-
-      // Create FTP connection with simple settings
-      final FTPConnect ftpConnect = FTPConnect(deviceIp, port: 21, user: 'anonymous', pass: '');
-      final bool connected = await ftpConnect.connect();
-
-      if (!connected) {
-        _log('FTP: Failed to connect to $deviceIp:21');
-        _setStatus('FTP connection failed', null);
-        if (mounted) Future.delayed(const Duration(seconds: 2), _clearStatus);
-        return;
+      String user = 'anonymous';
+      String pass = '';
+      bool usedSavedCreds = false;
+      if (_ftpCredentialsByDevice.containsKey(deviceKey)) {
+        user = _ftpCredentialsByDevice[deviceKey]!.user;
+        pass = _ftpCredentialsByDevice[deviceKey]!.password;
+        usedSavedCreds = true;
+        _log('FTP: Connecting to $deviceIp:21 as saved user "$user"');
+      } else {
+        _log('FTP: Connecting to $deviceIp:21 as anonymous');
       }
-      
+
+      FTPConnect ftpConnect = FTPConnect(deviceIp, port: 21, user: user, pass: pass);
+      bool connected = false;
+      try {
+        connected = await ftpConnect.connect();
+      } catch (e) {
+        _log('FTP: Login failed for $deviceIp:21: $e');
+        connected = false;
+      }
+
+      while (!connected) {
+        _log('FTP: Requesting login/password for $deviceIp:21');
+        if (usedSavedCreds) {
+          _ftpCredentialsByDevice.remove(deviceKey);
+          _log('FTP: Cleared saved credentials for $deviceKey');
+        }
+        final creds = await _showFtpLoginDialog(deviceIp, mdnsDevice.displayName);
+        if (creds == null || !mounted) return;
+        user = creds.user;
+        pass = creds.password;
+        ftpConnect = FTPConnect(deviceIp, port: 21, user: user, pass: pass);
+        try {
+          connected = await ftpConnect.connect();
+        } catch (e) {
+          _log('FTP: Login with user credentials failed: $e');
+          connected = false;
+        }
+        if (!connected) {
+          _setStatus('Login failed – check username/password', null);
+          continue;
+        }
+        _ftpCredentialsByDevice[deviceKey] = (user: user, password: pass);
+        _log('FTP: Logged in and saved credentials for $deviceKey');
+        usedSavedCreds = false;
+      }
+
       _log('FTP: Successfully connected to $deviceIp:21');
       _setStatus('Loading manifest...', 0.2);
 
-      // Try different transfer modes if passive fails
-      try {
-        ftpConnect.transferMode = TransferMode.passive;
-        _log('FTP: Passive mode enabled for data transfers');
-      } catch (e) {
-        _log('FTP: Failed to set passive mode, trying active mode: $e');
+      bool opRetried = false;
+      while (true) {
         try {
-          ftpConnect.transferMode = TransferMode.active;
-          _log('FTP: Active mode enabled for data transfers');
-        } catch (e2) {
-          _log('FTP: Failed to set transfer mode: $e2');
-        }
-      }
-
-      try {
-        // Search for manifest-*.json files on FTP
-        final String? manifestFileName = await _findManifestFileInFtp(ftpConnect);
-        if (manifestFileName != null) {
-          _log('FTP: Found manifest file: $manifestFileName');
-          
-          // Download the manifest file
-          final File tempManifestFile = File('./temp_manifest.json');
-          final bool manifestDownloaded = await ftpConnect.downloadFile(manifestFileName, tempManifestFile);
-          
-          if (manifestDownloaded && await tempManifestFile.exists()) {
-            _cachedManifestPath = 'ftp://$deviceIp/$manifestFileName';
-            _cachedManifestContent = await tempManifestFile.readAsString();
-            _log('FTP: Successfully downloaded manifest file (${_cachedManifestContent!.length} bytes)');
-            _parseManifestFile(_cachedManifestContent!);
-            
-            // Clean up temporary manifest file
+          // Try different transfer modes if passive fails
+          try {
+            ftpConnect.transferMode = TransferMode.passive;
+            _log('FTP: Passive mode enabled for data transfers');
+          } catch (e) {
+            _log('FTP: Failed to set passive mode, trying active mode: $e');
             try {
-              await tempManifestFile.delete();
-            } catch (_) {}
-          } else {
-            _log('FTP: Failed to download manifest file');
-          }
-        } else {
-          _log('FTP: No manifest-*.json files found');
-        }
-      } catch (e) {
-        _log('FTP: Error downloading manifest file: $e');
-        
-        // Fallback: Try direct download of common manifest files
-        _log('FTP: Trying fallback direct download approach');
-        final List<String> commonManifestNames = [
-          'manifest.json',
-          'manifest-3.31.json',
-          'manifest-3.30.json',
-          'manifest-1.0.json',
-        ];
-        
-        for (final String manifestName in commonManifestNames) {
-          try {
-            _log('FTP: Trying direct download of $manifestName');
-            final File tempManifestFile = File('./temp_manifest.json');
-            final bool downloaded = await ftpConnect.downloadFile(manifestName, tempManifestFile);
-            
-            if (downloaded && await tempManifestFile.exists()) {
-              _cachedManifestPath = 'ftp://$deviceIp/$manifestName';
-              _cachedManifestContent = await tempManifestFile.readAsString();
-              _log('FTP: Successfully downloaded manifest file via fallback (${_cachedManifestContent!.length} bytes)');
-              _parseManifestFile(_cachedManifestContent!);
-              
-              try {
-                await tempManifestFile.delete();
-              } catch (_) {}
-              break; // Success, exit the loop
+              ftpConnect.transferMode = TransferMode.active;
+              _log('FTP: Active mode enabled for data transfers');
+            } catch (e2) {
+              _log('FTP: Failed to set transfer mode: $e2');
             }
-          } catch (e2) {
-            _log('FTP: Fallback download failed for $manifestName: $e2');
+          }
+
+          // Search for manifest-*.json files on FTP
+          try {
+            final String? manifestFileName = await _findManifestFileInFtp(ftpConnect);
+            if (manifestFileName != null) {
+              _log('FTP: Found manifest file: $manifestFileName');
+              final File tempManifestFile = File('./temp_manifest.json');
+              final bool manifestDownloaded = await ftpConnect.downloadFile(manifestFileName, tempManifestFile);
+              if (manifestDownloaded && await tempManifestFile.exists()) {
+                _cachedManifestPath = 'ftp://$deviceIp/$manifestFileName';
+                _cachedManifestContent = await tempManifestFile.readAsString();
+                _log('FTP: Successfully downloaded manifest file (${_cachedManifestContent!.length} bytes)');
+                _parseManifestFile(_cachedManifestContent!);
+                try {
+                  await tempManifestFile.delete();
+                } catch (_) {}
+              } else {
+                _log('FTP: Failed to download manifest file');
+              }
+            } else {
+              _log('FTP: No manifest-*.json files found');
+            }
+          } catch (e) {
+            _log('FTP: Error downloading manifest file: $e');
+            // Fallback: Try direct download of common manifest files
+            _log('FTP: Trying fallback direct download approach');
+            final List<String> commonManifestNames = [
+              'manifest.json',
+              'manifest-3.31.json',
+              'manifest-3.30.json',
+              'manifest-1.0.json',
+            ];
+            for (final String manifestName in commonManifestNames) {
+              try {
+                _log('FTP: Trying direct download of $manifestName');
+                final File tempManifestFile = File('./temp_manifest.json');
+                final bool downloaded = await ftpConnect.downloadFile(manifestName, tempManifestFile);
+                if (downloaded && await tempManifestFile.exists()) {
+                  _cachedManifestPath = 'ftp://$deviceIp/$manifestName';
+                  _cachedManifestContent = await tempManifestFile.readAsString();
+                  _log('FTP: Successfully downloaded manifest file via fallback (${_cachedManifestContent!.length} bytes)');
+                  _parseManifestFile(_cachedManifestContent!);
+                  try {
+                    await tempManifestFile.delete();
+                  } catch (_) {}
+                  break;
+                }
+              } catch (e2) {
+              _log('FTP: Fallback download failed for $manifestName: $e2');
+            }
+          }
+          }
+
+          _setStatus('Loading config...', 0.6);
+          try {
+            final File tempConfigFile = File('./temp_config.ini');
+            final bool configDownloaded = await ftpConnect.downloadFile('config.ini', tempConfigFile);
+            if (configDownloaded && await tempConfigFile.exists()) {
+              _cachedConfigPath = 'ftp://$deviceIp/config.ini';
+              _cachedConfigContent = await tempConfigFile.readAsString();
+              _cachedConfigContent = _cachedConfigContent!.replaceAll('\r\n', '\n');
+              _log('FTP: Successfully downloaded config.ini (${_cachedConfigContent!.length} bytes)');
+              _parseConfigFile(_cachedConfigContent!);
+              _synchronizeEditorWithCachedContent();
+              _cachedSuggestions.clear();
+              try {
+                await tempConfigFile.delete();
+              } catch (_) {}
+            } else {
+              _log('FTP: Failed to download config.ini');
+            }
+          } catch (e) {
+            _log('FTP: Error downloading config.ini: $e');
+          }
+
+        // Disconnect from FTP server
+        try {
+          await ftpConnect.disconnect();
+          _log('FTP: Disconnected from server');
+        } catch (_) {}
+
+        _setStatus('Ready', 1.0);
+        break;
+        } catch (e) {
+          _log('FTP: Error during operations: $e');
+          if (!opRetried && _ftpCredentialsByDevice.containsKey(deviceKey)) {
+            opRetried = true;
+            _ftpCredentialsByDevice.remove(deviceKey);
+            _log('FTP: Cleared saved credentials after error, re-prompting');
+            try {
+              await ftpConnect.disconnect();
+            } catch (_) {}
+            bool reconnected = false;
+            while (!reconnected) {
+              final creds = await _showFtpLoginDialog(deviceIp, mdnsDevice.displayName);
+              if (creds == null || !mounted) return;
+              ftpConnect = FTPConnect(deviceIp, port: 21, user: creds.user, pass: creds.password);
+              try {
+                reconnected = await ftpConnect.connect();
+              } catch (e) {
+                _log('FTP: Reconnect failed: $e');
+              }
+              if (!reconnected) {
+                _setStatus('Login failed – check username/password', null);
+                continue;
+              }
+              _ftpCredentialsByDevice[deviceKey] = (user: creds.user, password: creds.password);
+            }
+            _setStatus('Loading manifest...', 0.2);
+          } else {
+            rethrow;
           }
         }
       }
-
-      _setStatus('Loading config...', 0.6);
-      try {
-        // Load config.ini from FTP
-        final File tempConfigFile = File('./temp_config.ini');
-        final bool configDownloaded = await ftpConnect.downloadFile('config.ini', tempConfigFile);
-        
-        if (configDownloaded && await tempConfigFile.exists()) {
-          _cachedConfigPath = 'ftp://$deviceIp/config.ini';
-          _cachedConfigContent = await tempConfigFile.readAsString();
-          // Normalize line endings: replace Windows "\r\n" with Unix "\n"
-          _cachedConfigContent = _cachedConfigContent!.replaceAll('\r\n', '\n');
-          _log('FTP: Successfully downloaded config.ini (${_cachedConfigContent!.length} bytes)');
-          _parseConfigFile(_cachedConfigContent!);
-          
-          // Initialize the text editor with the loaded content
-          _synchronizeEditorWithCachedContent();
-          // Rebuild cached suggestions with new config data
-          _cachedSuggestions.clear();
-          
-          // Clean up temporary config file
-          try {
-            await tempConfigFile.delete();
-          } catch (_) {}
-        } else {
-          _log('FTP: Failed to download config.ini');
-        }
-      } catch (e) {
-        _log('FTP: Error downloading config.ini: $e');
-      }
-
-      // Disconnect from FTP server
-      try {
-        await ftpConnect.disconnect();
-        _log('FTP: Disconnected from server');
-      } catch (_) {}
-
-      _setStatus('Ready', 1.0);
     } catch (e) {
       _log('FTP: Error loading device files: $e');
       _setStatus('FTP error: ${e.toString().split('\n').first}', null);
@@ -7304,24 +7424,54 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _log('FTP save: No mDNS device selected');
       return false;
     }
-    
+
     bool success = false;
-    
+    final String deviceKey = _selected!.identifier;
+    final String deviceIp = deviceKey.split(':')[0];
+    String user = 'anonymous';
+    String pass = '';
+    if (_ftpCredentialsByDevice.containsKey(deviceKey)) {
+      user = _ftpCredentialsByDevice[deviceKey]!.user;
+      pass = _ftpCredentialsByDevice[deviceKey]!.password;
+      _log('FTP: Connecting to $deviceIp:21 for save (saved user)');
+    } else {
+      _log('FTP: Connecting to $deviceIp:21 for save (anonymous)');
+    }
+
     try {
-      // Extract IP address from device identifier (format: "ip:port")
-      final String deviceIp = _selected!.identifier.split(':')[0];
-      
-      _log('FTP: Connecting to $deviceIp:21 for save');
-      
-      // Create FTP connection
-      final FTPConnect ftpConnect = FTPConnect(deviceIp, port: 21, user: 'anonymous', pass: '');
-      final bool connected = await ftpConnect.connect();
-      
-      if (!connected) {
-        _log('FTP: Failed to connect to $deviceIp:21 for save');
-        return false;
+      FTPConnect ftpConnect = FTPConnect(deviceIp, port: 21, user: user, pass: pass);
+      bool connected = false;
+      try {
+        connected = await ftpConnect.connect();
+      } catch (e) {
+        _log('FTP: Login failed for save: $e');
       }
-      
+
+      if (!connected) {
+        _log('FTP: Requesting login/password for save');
+        if (_ftpCredentialsByDevice.containsKey(deviceKey)) {
+          _ftpCredentialsByDevice.remove(deviceKey);
+        }
+        while (!connected) {
+          final creds = await _showFtpLoginDialog(deviceIp, _selected!.displayName);
+          if (creds == null || !mounted) return false;
+          user = creds.user;
+          pass = creds.password;
+          ftpConnect = FTPConnect(deviceIp, port: 21, user: user, pass: pass);
+          try {
+            connected = await ftpConnect.connect();
+          } catch (e) {
+            _log('FTP: Login for save failed: $e');
+            connected = false;
+          }
+          if (!connected) {
+            _setStatus('Login failed – check username/password', null);
+            continue;
+          }
+          _ftpCredentialsByDevice[deviceKey] = (user: user, password: pass);
+        }
+      }
+
       _log('FTP: Successfully connected for save');
       
       // Set transfer mode to passive for data transfers
