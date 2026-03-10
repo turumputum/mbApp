@@ -4696,6 +4696,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _setStatus('Loading manifest...', 0.2);
 
       bool opRetried = false;
+      bool manifestLoadFailed = false;
+      bool configLoadFailed = false;
       while (true) {
         try {
           // Try different transfer modes if passive fails
@@ -4729,12 +4731,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 } catch (_) {}
               } else {
                 _log('FTP: Failed to download manifest file');
+                manifestLoadFailed = true;
               }
             } else {
               _log('FTP: No manifest-*.json files found');
+              manifestLoadFailed = true;
             }
           } catch (e) {
             _log('FTP: Error downloading manifest file: $e');
+            manifestLoadFailed = true;
             // Fallback: Try direct download of common manifest files
             _log('FTP: Trying fallback direct download approach');
             final List<String> commonManifestNames = [
@@ -4759,9 +4764,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   break;
                 }
               } catch (e2) {
-              _log('FTP: Fallback download failed for $manifestName: $e2');
+                _log('FTP: Fallback download failed for $manifestName: $e2');
+              }
             }
-          }
+            if (_cachedManifestContent == null) manifestLoadFailed = true;
           }
 
           _setStatus('Loading config...', 0.6);
@@ -4781,19 +4787,34 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               } catch (_) {}
             } else {
               _log('FTP: Failed to download config.ini');
+              configLoadFailed = true;
             }
           } catch (e) {
             _log('FTP: Error downloading config.ini: $e');
+            configLoadFailed = true;
           }
 
-        // Disconnect from FTP server
-        try {
-          await ftpConnect.disconnect();
-          _log('FTP: Disconnected from server');
-        } catch (_) {}
+          // Disconnect from FTP server
+          try {
+            await ftpConnect.disconnect();
+            _log('FTP: Disconnected from server');
+          } catch (_) {}
 
-        _setStatus('Ready', 1.0);
-        break;
+          _setStatus('Ready', 1.0);
+          if (manifestLoadFailed || configLoadFailed) {
+            final List<String> parts = <String>[];
+            if (manifestLoadFailed) parts.add('manifest');
+            if (configLoadFailed) parts.add('config.ini');
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('FTP: Could not load ${parts.join(' and ')}'),
+                  duration: const Duration(seconds: 5),
+                ),
+              );
+            }
+          }
+          break;
         } catch (e) {
           _log('FTP: Error during operations: $e');
           if (!opRetried && _ftpCredentialsByDevice.containsKey(deviceKey)) {
