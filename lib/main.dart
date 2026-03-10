@@ -817,7 +817,73 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       _log('mDNS: Stack trace: ${stackTrace.toString().split('\n').take(3).join('\n')}');
     }
   }
-  
+
+  /// Resolve SRV + A for a service name (non-Windows MDnsClient path) and add device to list
+  Future<void> _addMdnsDeviceFromServiceName(MDnsClient client, String serviceName) async {
+    const Duration resolveTimeout = Duration(seconds: 2);
+    try {
+      SrvResourceRecord? srv;
+      await for (final SrvResourceRecord r in client
+          .lookup<SrvResourceRecord>(ResourceRecordQuery.service(serviceName))
+          .timeout(resolveTimeout, onTimeout: (sink) => sink.close())) {
+        srv = r;
+        break;
+      }
+      if (srv == null) {
+        _log('mDNS: No SRV record for $serviceName');
+        return;
+      }
+      final String target = srv.target;
+      final int port = srv.port;
+
+      InternetAddress? ipAddress;
+      await for (final IPAddressResourceRecord a in client
+          .lookup<IPAddressResourceRecord>(ResourceRecordQuery.addressIPv4(target))
+          .timeout(resolveTimeout, onTimeout: (sink) => sink.close())) {
+        ipAddress = a.address;
+        break;
+      }
+      if (ipAddress == null) {
+        if (RegExp(r'^\d+\.\d+\.\d+\.\d+$').hasMatch(target)) {
+          ipAddress = InternetAddress.tryParse(target);
+        }
+        if (ipAddress == null) {
+          _log('mDNS: No A record for target: $target');
+          return;
+        }
+      }
+      final String ip = ipAddress.address;
+
+      String? deviceName = _extractDeviceNameFromPtr(serviceName);
+      if (deviceName == null || deviceName.isEmpty) {
+        deviceName = serviceName.split('.').first;
+      }
+
+      final String deviceId = '$ip:$port';
+      if (_mdnsDiscoveredDevices.contains(deviceId)) {
+        return;
+      }
+      _mdnsDiscoveredDevices.add(deviceId);
+
+      final DeviceItem device = DeviceItem(
+        displayName: deviceName.isEmpty ? '(unnamed)' : deviceName,
+        kind: 'mDNS',
+        identifier: deviceId,
+        extra: <String, Object?>{
+          'hostname': target,
+          'ip': ip,
+          'port': port,
+          'service_name': serviceName,
+          'service_type': '_ftp._tcp',
+        },
+      );
+      _log('mDNS: Adding device: "${device.displayName}" from $ip:$port');
+      _addOrUpdateDevice(device, 'mdns');
+    } catch (e) {
+      _log('mDNS: Error resolving $serviceName: ${e.toString().split('\n').first}');
+    }
+  }
+
   /// Extract device name from PTR record
   /// Example: "FTP server on moduleBox 'mbGlassPanTouch'._ftp._tcp.local" -> "mbGlassPanTouch"
   String? _extractDeviceNameFromPtr(String ptrName) {
@@ -1579,17 +1645,15 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
               })) {
                 final String serviceName = ptr.domainName;
                 _log('mDNS: Found service: $serviceName');
-                
-                // Process SRV, TXT, etc. (same as Windows version)
-                // ... (similar processing logic)
-            }
+                await _addMdnsDeviceFromServiceName(client, serviceName);
+              }
             } catch (e) {
               _log('mDNS: Error: $e');
+            }
           }
+        } finally {
+          client.stop();
         }
-      } finally {
-        client.stop();
-      }
       }
       
       _log('mDNS: scan finished.');
