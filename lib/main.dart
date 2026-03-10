@@ -4071,23 +4071,29 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   /// Internal method to actually show the overlay
   void _showConsoleSuggestionOverlayInternal(List<String> suggestions, String currentWord) {
     if (!mounted) return;
-    
+
     final RenderBox? focusBox = _consoleInputFocusNode.context?.findRenderObject() as RenderBox?;
     if (focusBox == null) return;
-    
+
     final Offset focusPosition = focusBox.localToGlobal(Offset.zero);
     final double popupWidth = 300.0;
     final double popupHeight = (suggestions.length * 40.0).clamp(80.0, 300.0);
-    
+    const double gap = 4.0;
+
     _consoleSuggestionOverlay = OverlayEntry(
       builder: (overlayContext) {
         final Size screenSize = MediaQuery.of(overlayContext).size;
         final double popupX = focusPosition.dx.clamp(0.0, screenSize.width - popupWidth);
-        final double popupY = focusPosition.dy + focusBox.size.height + 4;
-        
+        // Open upward if not enough space below the input field
+        final double spaceBelow = screenSize.height - (focusPosition.dy + focusBox.size.height + gap);
+        final bool openUpward = spaceBelow < popupHeight;
+        final double popupY = openUpward
+            ? focusPosition.dy - popupHeight - gap
+            : focusPosition.dy + focusBox.size.height + gap;
+
         return Positioned(
           left: popupX,
-          top: popupY,
+          top: popupY.clamp(0.0, screenSize.height - popupHeight),
           width: popupWidth,
           child: Material(
             elevation: 4,
