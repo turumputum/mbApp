@@ -1,16 +1,267 @@
-# moduleboxapp
+# moduleBox App
 
-A new Flutter project.
+Десктопное Flutter-приложение для обнаружения, настройки и управления устройствами **moduleBox**. Поддерживает подключение по **Serial (USB)** и **mDNS / FTP** (по сети), работает на **Windows** и **Linux**.
 
-## Getting Started
+---
 
-This project is a starting point for a Flutter application.
+## Содержание
 
-A few resources to get you started if this is your first Flutter project:
+- [Обзор](#обзор)
+- [Возможности](#возможности)
+- [Архитектура](#архитектура)
+- [Требования](#требования)
+- [Установка и запуск](#установка-и-запуск)
+  - [Windows](#windows)
+  - [Linux](#linux)
+- [Сборка релиза](#сборка-релиза)
+- [Структура проекта](#структура-проекта)
+- [Используемые зависимости](#используемые-зависимости)
+- [Работа с приложением](#работа-с-приложением)
+- [Скрипты](#скрипты)
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+---
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Обзор
+
+**moduleBox App** — инструмент для работы с IoT-устройствами семейства moduleBox. Приложение автоматически обнаруживает подключённые устройства (по USB/Serial или по сети через mDNS) и предоставляет интерфейс для:
+
+- просмотра и редактирования конфигурации устройства (`config.ini`);
+- чтения манифеста устройства (`manifest-*.json`);
+- отправки команд через serial-консоль;
+- загрузки и выгрузки файлов через встроенный FTP-клиент;
+- настройки cross-link правил между слотами устройства.
+
+---
+
+## Возможности
+
+| Функция | Описание |
+|---|---|
+| **Device Discovery** | Автоматическое фоновое сканирование Serial-портов и mDNS-сервисов (`_ftp._tcp`) |
+| **Serial-подключение** | Чтение конфигурационных файлов с SD-карты (съёмных дисков), прямая отправка команд через serial-порт |
+| **mDNS + FTP** | Обнаружение устройств по mDNS (multicast DNS, порт 5353), загрузка/сохранение файлов через анонимный FTP |
+| **Config Editor** | Текстовый редактор конфигурации с подсветкой и автодополнением ключей на основе манифеста |
+| **Config Designer** | Визуальный редактор параметров конфигурации по секциям (chapters), с поддержкой описаний из манифеста |
+| **Serial Console** | Интерактивная консоль для отправки команд на serial-устройство с историей команд и автодополнением |
+| **Cross-link Builder** | Пошаговый мастер построения cross-link правил (source slot → report → value → target slot → command → value) |
+| **Автодополнение** | Контекстные подсказки для ключей `mode`, `options`, `crosslink` и других параметров из манифеста |
+| **WinAPI (FFI)** | Прямые вызовы WinSock API через `dart:ffi` для настройки multicast-сокета на Windows (`IP_ADD_MEMBERSHIP`) |
+
+---
+
+## Архитектура
+
+Приложение написано на **Dart / Flutter** и содержит единственный файл логики — `lib/main.dart` (~7000 строк). Основные компоненты:
+
+```
+ModuleBoxApp (MaterialApp)
+└── HomePage (StatefulWidget)
+    ├── Панель устройств (DeviceItem list)
+    │   ├── Serial-устройства (USB)
+    │   └── mDNS-устройства (сеть)
+    ├── Config Edit Tab    — текстовый редактор config.ini
+    ├── Config Design Tab  — визуальный редактор по секциям
+    └── Console Tab        — serial-консоль (только для USB-устройств)
+```
+
+### Потоки данных
+
+1. **Фоновое сканирование** (`_startBackgroundScanning`) — периодически опрашивает serial-порты и отправляет mDNS-запросы.
+2. **mDNS-сокет** (`_initializeMdnsSocket`) — постоянное соединение на порт 5353 с multicast-подпиской (224.0.0.251). На Windows используется FFI для вызова `setsockopt(IP_ADD_MEMBERSHIP)`.
+3. **FTP-клиент** — анонимное подключение к FTP-серверу устройства для чтения `manifest-*.json` и `config.ini`, а также для сохранения изменённой конфигурации.
+4. **Serial-консоль** — открытие serial-порта, обмен текстовыми командами с устройством в формате `deviceName/command`.
+
+---
+
+## Требования
+
+### Общие
+
+- **Flutter SDK** ≥ 3.9.2 (Dart SDK ≥ 3.9.2)
+- **Git**
+
+### Windows
+
+- **Visual Studio** с компонентом «Разработка классических приложений на C++» (Desktop development with C++)
+  - Бесплатная редакция: [Visual Studio Community](https://visualstudio.microsoft.com/ru/free-developer-offers/)
+- Включённый **режим разработчика** Windows (Developer Mode) — при первом запуске Flutter выведет инструкцию, если режим не включён
+
+### Linux
+
+- Стандартные зависимости Flutter для Linux:
+  ```bash
+  sudo apt install clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev
+  ```
+- Библиотека `libserialport` (для работы с serial-портами)
+
+---
+
+## Установка и запуск
+
+### Windows
+
+1. Установите [Flutter SDK](https://docs.flutter.dev/install/manual) и добавьте его в `PATH`.
+2. Установите Visual Studio с поддержкой сборки C++ десктопных приложений.
+3. Клонируйте репозиторий:
+   ```cmd
+   git clone <repo-url>
+   cd mbApp
+   ```
+4. Получите зависимости:
+   ```cmd
+   flutter pub get
+   ```
+5. Запустите приложение:
+   ```cmd
+   0_run.cmd
+   ```
+   или напрямую:
+   ```cmd
+   flutter run -d windows
+   ```
+
+> **Примечание:** при первом запуске может потребоваться включить Developer Mode в Windows. Следуйте инструкции из описания ошибки.
+
+### Linux
+
+1. Установите Flutter SDK и системные зависимости.
+2. Клонируйте репозиторий и перейдите в директорию.
+3. Получите зависимости:
+   ```bash
+   flutter pub get
+   ```
+4. Запустите в debug-режиме:
+   ```bash
+   ./0_debug.sh
+   ```
+5. После сборки запустите бинарник:
+   ```bash
+   ./1_run.sh
+   ```
+
+---
+
+## Сборка релиза
+
+### Windows
+
+```cmd
+0_release.cmd
+```
+
+или вручную:
+
+```cmd
+flutter build windows --release
+```
+
+Артефакты сборки находятся в `build/windows/x64/runner/Release/`.
+
+### Linux
+
+```bash
+./0_make_release.sh
+```
+
+или вручную:
+
+```bash
+flutter build linux --release
+```
+
+Артефакты сборки: `build/linux/x64/release/bundle/`.
+
+---
+
+## Структура проекта
+
+```
+mbApp/
+├── lib/
+│   └── main.dart              # Основной код приложения (UI + логика)
+├── windows/                   # Платформенный код Windows (C++, CMake)
+├── linux/                     # Платформенный код Linux (C++, CMake)
+├── macos/                     # Платформенный код macOS (Swift, Xcode)
+├── test/
+│   └── widget_test.dart       # Тесты виджетов
+├── docs/
+│   └── WINDOWS_INSTALL.txt    # Инструкция по установке на Windows
+├── build/                     # Артефакты сборки (генерируются автоматически)
+├── pubspec.yaml               # Зависимости и метаданные проекта
+├── analysis_options.yaml      # Настройки линтера Dart
+├── 0_run.cmd                  # Запуск (Windows, debug)
+├── 0_release.cmd              # Сборка релиза (Windows)
+├── 0_debug.sh                 # Запуск (Linux, debug)
+├── 0_make_release.sh          # Сборка релиза (Linux)
+└── 1_run.sh                   # Запуск собранного бинарника (Linux)
+```
+
+---
+
+## Используемые зависимости
+
+| Пакет | Версия | Назначение |
+|---|---|---|
+| `flutter_libserialport` | ^0.3.0 | Работа с serial-портами (USB-устройства) |
+| `ftpconnect` | ^2.0.7 | FTP-клиент для загрузки/сохранения файлов на устройство |
+| `flutter_quill` | ^11.4.2 | Rich-text редактор (зависимость в pubspec) |
+| `multicast_dns` | ^0.3.2+2 | mDNS Service Discovery |
+| `ffi` | ^2.1.0 | Вызовы нативных функций (WinAPI setsockopt и др.) |
+| `cupertino_icons` | ^1.0.8 | Иконки в стиле iOS |
+
+**Dev-зависимости:**
+
+| Пакет | Версия | Назначение |
+|---|---|---|
+| `flutter_test` | SDK | Фреймворк тестирования |
+| `flutter_lints` | ^5.0.0 | Правила линтинга |
+
+---
+
+## Работа с приложением
+
+### 1. Обнаружение устройств
+
+При запуске приложение автоматически начинает фоновое сканирование:
+
+- **Serial-порты** — перечисляет доступные COM-порты (Windows) или `/dev/ttyUSB*` (Linux) и пытается определить подключённое устройство moduleBox.
+- **mDNS** — отправляет DNS-SD запросы для сервиса `_ftp._tcp.local` и слушает ответы на multicast-адресе `224.0.0.251:5353`.
+
+Найденные устройства отображаются в списке слева с указанием типа подключения (`serial` или `mDNS`) и идентификатора.
+
+### 2. Редактирование конфигурации
+
+При выборе устройства приложение загружает его файлы:
+
+- Для **serial-устройств** — ищет `config.ini` на съёмных дисках (D:\–K:\ на Windows, /media, /mnt, /Volumes на Linux/macOS).
+- Для **mDNS-устройств** — подключается по FTP к устройству и скачивает `config.ini` и `manifest-*.json`.
+
+Доступны два режима редактирования:
+
+- **Config Edit** — текстовый редактор с автодополнением ключей и значений.
+- **Config Design** — визуальный редактор: параметры сгруппированы по секциям (chapters), значения редактируются в полях ввода с описаниями из манифеста.
+
+### 3. Serial-консоль
+
+Для устройств, подключённых по USB, доступна вкладка **Console**:
+
+- Команды отправляются в формате `deviceName/command`.
+- Поддерживается история команд (навигация стрелками вверх/вниз).
+- Автодополнение доступных команд и cross-link параметров.
+
+### 4. Сохранение конфигурации
+
+- Для **serial-устройств** — файл сохраняется обратно на съёмный диск.
+- Для **mDNS-устройств** — файл загружается на FTP-сервер устройства.
+
+---
+
+## Скрипты
+
+| Скрипт | Платформа | Описание |
+|---|---|---|
+| `0_run.cmd` | Windows | `flutter run -d windows` — запуск в debug-режиме |
+| `0_release.cmd` | Windows | `flutter build windows --release` — сборка релиза |
+| `0_debug.sh` | Linux | `flutter run -d linux` — запуск в debug-режиме |
+| `0_make_release.sh` | Linux | `flutter build linux --release` — сборка релиза |
+| `1_run.sh` | Linux | Запуск собранного debug-бинарника |
