@@ -777,7 +777,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       // Process each PTR record (service instance)
       for (final ptrRecord in ptrRecords) {
         final String ptrName = ptrRecord['ptr'] as String;
-        
+        if (!ptrName.contains('FTP server on moduleBox')) {
+          continue;
+        }
         // Extract device name from PTR (e.g., "FTP server on moduleBox 'mbGlassPanTouch'._ftp._tcp.local" -> "mbGlassPanTouch")
         String? deviceName = _extractDeviceNameFromPtr(ptrName);
         if (deviceName == null || deviceName.isEmpty) {
@@ -875,6 +877,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   /// Resolve SRV + A for a service name (non-Windows MDnsClient path) and add device to list
   Future<void> _addMdnsDeviceFromServiceName(MDnsClient client, String serviceName) async {
+    if (!serviceName.contains('FTP server on moduleBox')) {
+      return;
+    }
     const Duration resolveTimeout = Duration(seconds: 2);
     try {
       SrvResourceRecord? srv;
