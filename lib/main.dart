@@ -1962,13 +1962,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     ]));
   }
 
+  static const int _statusProgressSegmentCount = 12;
+
   Widget _buildStatusBar() {
     final bool showProgress = _statusMessage.isNotEmpty;
+    final ColorScheme scheme = Theme.of(context).colorScheme;
     return Container(
-      height: 28,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      height: 32,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.6),
+        color: scheme.surfaceContainerHighest.withOpacity(0.6),
         border: Border(top: BorderSide(color: Theme.of(context).dividerColor)),
       ),
       child: Row(
@@ -1976,22 +1979,47 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           Expanded(
             child: Text(
               _statusMessage.isEmpty ? ' ' : _statusMessage,
-              style: Theme.of(context).textTheme.bodySmall,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                fontSize: 14,
+                height: 1.2,
+              ) ?? const TextStyle(fontSize: 14),
               overflow: TextOverflow.ellipsis,
             ),
           ),
           if (showProgress) ...[
             const SizedBox(width: 12),
-            SizedBox(
-              width: 120,
-              height: 6,
-              child: _statusProgress != null
-                  ? LinearProgressIndicator(value: _statusProgress)
-                  : const LinearProgressIndicator(),
+            Expanded(
+              flex: 2,
+              child: _buildSegmentedProgress(scheme),
             ),
           ],
         ],
       ),
+    );
+  }
+
+  Widget _buildSegmentedProgress(ColorScheme scheme) {
+    const int count = _statusProgressSegmentCount;
+    // When progress is null (indeterminate), show half-filled
+    final double progress = _statusProgress ?? 0.5;
+    final int filled = (progress * count).round().clamp(0, count);
+    final Color fillColor = scheme.primary;
+    final Color emptyColor = scheme.surfaceContainerHighest;
+
+    return Row(
+      children: List.generate(count, (int i) {
+        final bool isFilled = i < filled;
+        return Expanded(
+          child: Container(
+            margin: EdgeInsets.only(left: i == 0 ? 0 : 2),
+            height: 8,
+            decoration: BoxDecoration(
+              color: isFilled ? fillColor : emptyColor,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        );
+      }),
     );
   }
 
