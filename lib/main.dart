@@ -4,6 +4,7 @@ import 'dart:ffi' as ffi;
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -123,7 +124,50 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final Match? m = re.firstMatch(path);
     return m != null ? m.group(1) : null;
   }
-  
+
+  /// Selected firmware update file path (for mDNS update flow)
+  String? _updateFirmwarePath;
+
+  static const int _updateMagic = 0x4E464E4D;
+
+  /// Check file has valid UPDATEHEAD (magic at offset 0).
+  Future<bool> _isValidFirmwareFile(String path) async {
+    try {
+      final File f = File(path);
+      if (!await f.exists()) return false;
+      final RandomAccessFile raf = await f.open(mode: FileMode.read);
+      try {
+        if (await raf.length() < 16) return false;
+        final Uint8List buf = Uint8List(16);
+        await raf.setPosition(0);
+        final int n = await raf.readInto(buf);
+        if (n < 16) return false;
+        final ByteData b = ByteData.sublistView(buf);
+        return b.getUint32(0, Endian.little) == _updateMagic;
+      } finally {
+        await raf.close();
+      }
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Let user pick firmware file; validate header; on success save path and refresh.
+  Future<void> _pickFirmwareFile() async {
+    final FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.any);
+    final String? path = result?.files.singleOrNull?.path;
+    if (path == null || path.isEmpty) return;
+    final bool valid = await _isValidFirmwareFile(path);
+    if (!mounted) return;
+    if (!valid) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Файл не похож на обновление')),
+      );
+      return;
+    }
+    setState(() => _updateFirmwarePath = path);
+  }
+
   // Configuration parsing
   Map<String, Map<String, String>> _parsedConfig = {};
   Map<String, Map<String, String>> _originalParsedConfig = {};
@@ -238,6 +282,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _cachedConfigContent = null;
     _cachedManifestPath = null;
     _cachedManifestContent = null;
+    _updateFirmwarePath = null;
     _parsedConfig.clear();
     _originalParsedConfig.clear();
     _configEditorController.clear();
@@ -2127,9 +2172,20 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 child: Text(item.displayName, style: Theme.of(context).textTheme.headlineSmall),
               ),
               if (!isSerial && _cachedManifestPath != null) ...[
-                TextButton(
-                  onPressed: () {},
-                  child: Text(_deviceFirmwareVersionFromManifest ?? '?'),
+                OutlinedButton(
+                  onPressed: _pickFirmwareFile,
+                  style: _updateFirmwarePath != null
+                      ? OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          backgroundColor: Colors.green,
+                          side: const BorderSide(color: Colors.green),
+                        )
+                      : null,
+                  child: Text(
+                    _updateFirmwarePath != null
+                        ? 'Обновить (текущая ${_deviceFirmwareVersionFromManifest ?? '?'})'
+                        : (_deviceFirmwareVersionFromManifest ?? '?'),
+                  ),
                 ),
               ],
             ],
