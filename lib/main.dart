@@ -184,6 +184,86 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     setState(() => _updateFirmwarePath = path);
   }
 
+  /// Try to get free space in bytes from FTP server (custom commands). Returns null if unknown.
+  Future<int?> _getFtpFreeSpace(FTPConnect ftp) async {
+    for (final String cmd in <String>['SITE FREE', 'STAT', 'XFREE']) {
+      try {
+        final reply = await ftp.sendCustomCommand(cmd);
+        final String msg = reply.message.trim();
+        final RegExp numRe = RegExp(r'\d+');
+        final Match? m = numRe.firstMatch(msg);
+        if (m != null) {
+          final int? value = int.tryParse(m.group(0)!);
+          if (value != null && value >= 0) return value;
+        }
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  /// Ensure enough free space for [requiredBytes]; delete log.txt and/or manifest if needed.
+  /// Returns (ok: true) if upload can proceed, (ok: false, free: X, required: Y) when insufficient.
+  Future<({bool ok, int? free, int required})> _ensureFtpSpaceForUpload(
+    FTPConnect ftp,
+    int requiredBytes,
+    ValueNotifier<double> progressNotifier,
+  ) async {
+    final int? free = await _getFtpFreeSpace(ftp);
+    if (free == null) return (ok: true, free: null, required: requiredBytes);
+    if (free >= requiredBytes) return (ok: true, free: free, required: requiredBytes);
+
+    progressNotifier.value = -1; // signal "checking space" for UI if needed
+    String? manifestFileName;
+    if (_cachedManifestPath != null && _cachedManifestPath!.isNotEmpty) {
+      final int lastSlash = _cachedManifestPath!.lastIndexOf('/');
+      if (lastSlash >= 0 && lastSlash < _cachedManifestPath!.length - 1) {
+        manifestFileName = _cachedManifestPath!.substring(lastSlash + 1);
+      }
+    }
+    int logSize = 0;
+    int manifestSize = 0;
+    try {
+      final int s = await ftp.sizeFile('log.txt');
+      if (s > 0) logSize = s;
+    } catch (_) {}
+    if (manifestFileName != null && manifestFileName.isNotEmpty) {
+      try {
+        final int s = await ftp.sizeFile(manifestFileName);
+        if (s > 0) manifestSize = s;
+      } catch (_) {}
+    }
+
+    final int afterLog = free + logSize;
+    final int afterManifest = free + manifestSize;
+    final int afterBoth = free + logSize + manifestSize;
+
+    if (afterLog >= requiredBytes) {
+      try {
+        if (await ftp.deleteFile('log.txt')) {
+          _log('FTP: Deleted log.txt to free space');
+          return (ok: true, free: free, required: requiredBytes);
+        }
+      } catch (_) {}
+    }
+    if (afterManifest >= requiredBytes && manifestFileName != null) {
+      try {
+        if (await ftp.deleteFile(manifestFileName)) {
+          _log('FTP: Deleted $manifestFileName to free space');
+          return (ok: true, free: free, required: requiredBytes);
+        }
+      } catch (_) {}
+    }
+    if (afterBoth >= requiredBytes) {
+      try {
+        await ftp.deleteFile('log.txt');
+        if (manifestFileName != null) await ftp.deleteFile(manifestFileName);
+        _log('FTP: Deleted log.txt and manifest to free space');
+        return (ok: true, free: free, required: requiredBytes);
+      } catch (_) {}
+    }
+    return (ok: false, free: free, required: requiredBytes);
+  }
+
   /// Upload selected firmware file to mDNS device via FTP as UPDATE.FW.INCOMPLETE.
   Future<void> _uploadFirmwareToDevice(DeviceItem item) async {
     final String? path = _updateFirmwarePath;
@@ -196,6 +276,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       );
       return;
     }
+
+    final int requiredBytes = await file.length();
 
     final String deviceKey = item.identifier;
     final String deviceIp = deviceKey.split(':')[0];
@@ -230,9 +312,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  const Text('Идёт загрузка файла на устройство...'),
+                  Text(progress < 0
+                      ? 'Проверка свободного места...'
+                      : 'Идёт загрузка файла на устройство...'),
                   const SizedBox(height: 16),
-                  Text('${(progress * 100).toStringAsFixed(0)}%'),
+                  Text(progress >= 0 ? '${(progress * 100).toStringAsFixed(0)}%' : ''),
                   const SizedBox(height: 8),
                   LinearProgressIndicator(value: progress > 0 ? progress : null),
                 ],
@@ -261,6 +345,34 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       try {
         ftp.transferMode = TransferMode.passive;
       } catch (_) {}
+
+      // TODO: временно отключена проверка свободного места на FTP
+      const bool _checkFtpFreeSpace = false;
+      if (_checkFtpFreeSpace) {
+        final spaceResult = await _ensureFtpSpaceForUpload(
+          ftp, requiredBytes, progressNotifier,
+        );
+        if (!spaceResult.ok || !mounted) {
+          uploadFtpRef = null;
+          try { await ftp.disconnect(); } catch (_) {}
+          if (mounted) {
+            Navigator.of(context).pop();
+            final String freeStr = spaceResult.free != null
+                ? '${spaceResult.free} байт'
+                : 'неизвестно';
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  'Невозможно загрузить: недостаточно свободного места. '
+                  'Свободно: $freeStr, требуется: ${spaceResult.required} байт',
+                ),
+              ),
+            );
+          }
+          return;
+        }
+      }
+      progressNotifier.value = 0.0;
 
       final bool uploaded = await ftp.uploadFile(
         file,
