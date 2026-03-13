@@ -152,11 +152,27 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
-  /// Let user pick firmware file; validate header; on success save path and refresh.
+  /// Let user pick firmware file (*.FW); validate header; on success save path and refresh.
   Future<void> _pickFirmwareFile() async {
-    final FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.any);
+    FilePickerResult? result;
+    try {
+      result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: <String>['fw'],
+      );
+    } catch (_) {
+      // Custom extension .fw may be unsupported on some platforms; fallback to any
+      result = await FilePicker.platform.pickFiles(type: FileType.any);
+    }
     final String? path = result?.files.singleOrNull?.path;
     if (path == null || path.isEmpty) return;
+    if (!path.toLowerCase().endsWith('.fw')) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Выберите файл с расширением .FW')),
+      );
+      return;
+    }
     final bool valid = await _isValidFirmwareFile(path);
     if (!mounted) return;
     if (!valid) {
@@ -166,6 +182,123 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       return;
     }
     setState(() => _updateFirmwarePath = path);
+  }
+
+  /// Upload selected firmware file to mDNS device via FTP as UPDATE.FW.INCOMPLETE.
+  Future<void> _uploadFirmwareToDevice(DeviceItem item) async {
+    final String? path = _updateFirmwarePath;
+    if (path == null || path.isEmpty) return;
+    final File file = File(path);
+    if (!await file.exists()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Файл прошивки не найден')),
+      );
+      return;
+    }
+
+    final String deviceKey = item.identifier;
+    final String deviceIp = deviceKey.split(':')[0];
+    String user = 'anonymous';
+    String pass = '';
+
+    if (_ftpCredentialsByDevice.containsKey(deviceKey)) {
+      user = _ftpCredentialsByDevice[deviceKey]!.user;
+      pass = _ftpCredentialsByDevice[deviceKey]!.password;
+    } else {
+      final creds = await _showFtpLoginDialog(deviceIp, item.displayName);
+      if (creds == null || !mounted) return;
+      user = creds.user;
+      pass = creds.password;
+      _ftpCredentialsByDevice[deviceKey] = (user: user, password: pass);
+    }
+
+    bool cancelRequested = false;
+    final ValueNotifier<double> progressNotifier = ValueNotifier<double>(0.0);
+    FTPConnect? uploadFtpRef;
+
+    if (!mounted) return;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext ctx) {
+        return ValueListenableBuilder<double>(
+          valueListenable: progressNotifier,
+          builder: (BuildContext context, double progress, Widget? child) {
+            return AlertDialog(
+              title: const Text('Загрузка прошивки'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  const Text('Идёт загрузка файла на устройство...'),
+                  const SizedBox(height: 16),
+                  Text('${(progress * 100).toStringAsFixed(0)}%'),
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(value: progress > 0 ? progress : null),
+                ],
+              ),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () {
+                    cancelRequested = true;
+                    uploadFtpRef?.disconnect();
+                    Navigator.of(ctx).pop();
+                  },
+                  child: const Text('Отмена'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    try {
+      final FTPConnect ftp = FTPConnect(deviceIp, port: 21, user: user, pass: pass);
+      uploadFtpRef = ftp;
+      final bool connected = await ftp.connect();
+      if (!connected || !mounted) return;
+      try {
+        ftp.transferMode = TransferMode.passive;
+      } catch (_) {}
+
+      final bool uploaded = await ftp.uploadFile(
+        file,
+        sRemoteName: 'UPDATE.FW.INCOMPLETE',
+        onProgress: (double p, int received, int total) {
+          if (cancelRequested) return;
+          final double value = total > 0 ? received / total : 0.0;
+          progressNotifier.value = value;
+        },
+      );
+
+      uploadFtpRef = null;
+      try {
+        await ftp.disconnect();
+      } catch (_) {}
+
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      if (cancelRequested) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(uploaded
+              ? 'Прошивка загружена в корень устройства как UPDATE.FW.INCOMPLETE'
+              : 'Ошибка загрузки прошивки'),
+        ),
+      );
+    } catch (e) {
+      _log('Firmware upload error: $e');
+      uploadFtpRef = null;
+      if (mounted) {
+        if (!cancelRequested) {
+          Navigator.of(context).pop();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Ошибка: ${e.toString().split('\n').first}')),
+          );
+        }
+      }
+    }
   }
 
   // Configuration parsing
@@ -2173,7 +2306,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               ),
               if (!isSerial && _cachedManifestPath != null) ...[
                 OutlinedButton(
-                  onPressed: _pickFirmwareFile,
+                  onPressed: () {
+                    if (_updateFirmwarePath != null) {
+                      _uploadFirmwareToDevice(item);
+                    } else {
+                      _pickFirmwareFile();
+                    }
+                  },
                   style: _updateFirmwarePath != null
                       ? OutlinedButton.styleFrom(
                           foregroundColor: Colors.white,
@@ -4820,34 +4959,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           } catch (e) {
             _log('FTP: Error downloading manifest file: $e');
             manifestLoadFailed = true;
-            // Fallback: Try direct download of common manifest files
-            _log('FTP: Trying fallback direct download approach');
-            final List<String> commonManifestNames = [
-              'manifest.json',
-              'manifest-3.31.json',
-              'manifest-3.30.json',
-              'manifest-1.0.json',
-            ];
-            for (final String manifestName in commonManifestNames) {
-              try {
-                _log('FTP: Trying direct download of $manifestName');
-                final File tempManifestFile = File('./temp_manifest.json');
-                final bool downloaded = await ftpConnect.downloadFile(manifestName, tempManifestFile);
-                if (downloaded && await tempManifestFile.exists()) {
-                  _cachedManifestPath = 'ftp://$deviceIp/$manifestName';
-                  _cachedManifestContent = await tempManifestFile.readAsString();
-                  _log('FTP: Successfully downloaded manifest file via fallback (${_cachedManifestContent!.length} bytes)');
-                  _parseManifestFile(_cachedManifestContent!);
-                  try {
-                    await tempManifestFile.delete();
-                  } catch (_) {}
-                  break;
-                }
-              } catch (e2) {
-                _log('FTP: Fallback download failed for $manifestName: $e2');
-              }
-            }
-            if (_cachedManifestContent == null) manifestLoadFailed = true;
           }
 
           _setStatus('Loading config...', 0.6);
@@ -5481,7 +5592,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       
       // Look for manifest files (any file containing "manifest" and ending with ".json")
       for (final dynamic file in files) {
-        final String fileName = file.name?.toString() ?? '';
+        String fileName = file.name?.toString() ?? '';
+        // Some servers return full LIST line (e.g. "-rw-rw-rw- 2 1000 1000 96503 Jan 01 00:00 manifest-3.35.json"); use last token as name
+        final List<String> parts = fileName.trim().split(RegExp(r'\s+'));
+        if (parts.length > 1 && parts.last.toLowerCase().endsWith('.json')) {
+          fileName = parts.last;
+        }
         _log('FTP: Checking file: $fileName');
         
         // Check if file matches manifest pattern (manifest-*.json)
