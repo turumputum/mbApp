@@ -112,8 +112,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   // Cached files loaded from removable drives when serial device is selected
   String? _cachedManifestContent; // TODO: Use for device manifest display
   String? _cachedConfigContent;
-  String? _cachedManifestPath; // TODO: Use for device manifest display  
+  String? _cachedManifestPath; // TODO: Use for device manifest display
   String? _cachedConfigPath;
+
+  /// Firmware version from manifest path (e.g. manifest-3.35.json → "3.35")
+  String? get _deviceFirmwareVersionFromManifest {
+    final String? path = _cachedManifestPath;
+    if (path == null || path.isEmpty) return null;
+    final RegExp re = RegExp(r'manifest-([\d.]+)\.json');
+    final Match? m = re.firstMatch(path);
+    return m != null ? m.group(1) : null;
+  }
   
   // Configuration parsing
   Map<String, Map<String, String>> _parsedConfig = {};
@@ -211,8 +220,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         );
       },
     );
-    userController.dispose();
-    passController.dispose();
+    // Dispose after the route is fully removed to avoid "ChangeNotifier.debugAssertNotDisposed"
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      userController.dispose();
+      passController.dispose();
+    });
     return result;
   }
 
@@ -2109,7 +2121,19 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(item.displayName, style: Theme.of(context).textTheme.headlineSmall),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Text(item.displayName, style: Theme.of(context).textTheme.headlineSmall),
+              ),
+              if (!isSerial && _cachedManifestPath != null) ...[
+                TextButton(
+                  onPressed: () {},
+                  child: Text(_deviceFirmwareVersionFromManifest ?? '?'),
+                ),
+              ],
+            ],
+          ),
           const SizedBox(height: 8),
           Text('Kind: ${item.kind}'),
           Text('Identifier: ${item.identifier}'),
