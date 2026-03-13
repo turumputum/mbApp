@@ -272,6 +272,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         },
       );
 
+      bool renamed = false;
+      if (uploaded) {
+        renamed = await ftp.rename('UPDATE.FW.INCOMPLETE', 'UPDATE.FW');
+      }
+
       uploadFtpRef = null;
       try {
         await ftp.disconnect();
@@ -283,7 +288,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(uploaded
-              ? 'Прошивка загружена в корень устройства как UPDATE.FW.INCOMPLETE'
+              ? (renamed
+                  ? 'Прошивка загружена и переименована в UPDATE.FW'
+                  : 'Прошивка загружена (переименование в UPDATE.FW не удалось)')
               : 'Ошибка загрузки прошивки'),
         ),
       );
