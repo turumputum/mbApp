@@ -223,7 +223,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     int requiredBytes,
     ValueNotifier<double> progressNotifier,
   ) async {
-    final int? free = await _getFtpFreeSpace(ftp);
+    int? free = await _getFtpFreeSpace(ftp);
     _log('FTP: Space check: free=${free ?? "unknown"} bytes, required=$requiredBytes bytes');
     if (free == null) return (ok: true, free: null, required: requiredBytes);
     if (free >= requiredBytes) {
@@ -232,6 +232,37 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
 
     progressNotifier.value = -1; // signal "checking space" for UI if needed
+    // First, try to remove previous update files without counting them in free-space math
+    try {
+      final replyUpdate = await ftp.sendCustomCommand('SIZE UPDATE.FW');
+      _log('FTP: SIZE UPDATE.FW in space-check: code=${replyUpdate.code}, message=${replyUpdate.message}');
+      if (replyUpdate.isSuccessCode()) {
+        final bool deletedUpdate = await ftp.deleteFile('UPDATE.FW');
+        _log('FTP: DELETE UPDATE.FW in space-check: $deletedUpdate');
+      }
+    } catch (e) {
+      _log('FTP: Error checking/deleting UPDATE.FW in space-check: $e');
+    }
+    try {
+      final replyIncomplete = await ftp.sendCustomCommand('SIZE UPDATE.FW.INCOMPLETE');
+      _log('FTP: SIZE UPDATE.FW.INCOMPLETE in space-check: code=${replyIncomplete.code}, message=${replyIncomplete.message}');
+      if (replyIncomplete.isSuccessCode()) {
+        final bool deletedIncomplete = await ftp.deleteFile('UPDATE.FW.INCOMPLETE');
+        _log('FTP: DELETE UPDATE.FW.INCOMPLETE in space-check: $deletedIncomplete');
+      }
+    } catch (e) {
+      _log('FTP: Error checking/deleting UPDATE.FW.INCOMPLETE in space-check: $e');
+    }
+
+    // Re-check free space after cleaning old update files
+    free = await _getFtpFreeSpace(ftp);
+    _log('FTP: Space check after deleting UPDATE files: free=${free ?? "unknown"} bytes');
+    if (free == null) return (ok: true, free: null, required: requiredBytes);
+    if (free >= requiredBytes) {
+      _log('FTP: Space check passed after deleting UPDATE files');
+      return (ok: true, free: free, required: requiredBytes);
+    }
+
     String? manifestFileName;
     if (_cachedManifestPath != null && _cachedManifestPath!.isNotEmpty) {
       final int lastSlash = _cachedManifestPath!.lastIndexOf('/');
