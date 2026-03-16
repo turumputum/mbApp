@@ -394,8 +394,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
       // Ensure previous update file does not block new upload
       try {
-        final bool existsUpdate = await ftp.existFile('UPDATE.FW');
-        _log('FTP: UPDATE.FW exists before upload: $existsUpdate');
+        bool existsUpdate = false;
+        try {
+          final reply = await ftp.sendCustomCommand('SIZE UPDATE.FW');
+          _log('FTP: SIZE UPDATE.FW reply: code=${reply.code}, message=${reply.message}');
+          existsUpdate = reply.isSuccessCode();
+        } catch (e) {
+          _log('FTP: SIZE UPDATE.FW error: $e');
+        }
+        _log('FTP: UPDATE.FW exists before upload (by SIZE reply): $existsUpdate');
         if (existsUpdate) {
           final bool deleted = await ftp.deleteFile('UPDATE.FW');
           _log('FTP: DELETE UPDATE.FW result: $deleted');
