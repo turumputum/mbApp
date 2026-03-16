@@ -184,19 +184,34 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     setState(() => _updateFirmwarePath = path);
   }
 
-  /// Try to get free space in bytes from FTP server (custom commands). Returns null if unknown.
+  /// Try to get free space in bytes from FTP server using custom AVLB command.
+  /// Expected format: "<code> <bytes>", e.g. "213 3728769024".
+  /// Returns null if the command is unsupported or the value can't be parsed.
   Future<int?> _getFtpFreeSpace(FTPConnect ftp) async {
-    for (final String cmd in <String>['SITE FREE', 'STAT', 'XFREE']) {
-      try {
-        final reply = await ftp.sendCustomCommand(cmd);
-        final String msg = reply.message.trim();
-        final RegExp numRe = RegExp(r'\d+');
-        final Match? m = numRe.firstMatch(msg);
-        if (m != null) {
-          final int? value = int.tryParse(m.group(0)!);
-          if (value != null && value >= 0) return value;
-        }
-      } catch (_) {}
+    try {
+      final reply = await ftp.sendCustomCommand('AVLB');
+      final String msg = reply.message.trim();
+      _log('FTP: AVLB response: $msg');
+
+      // Extract all integers from the response.
+      final RegExp numRe = RegExp(r'\d+');
+      final Iterable<Match> matches = numRe.allMatches(msg);
+      if (matches.isEmpty) {
+        _log('FTP: AVLB: no numbers in response');
+        return null;
+      }
+
+      // In new firmware first number is reply code (e.g. 213), last is free bytes.
+      final String lastNumStr = matches.last.group(0)!;
+      final int? value = int.tryParse(lastNumStr);
+      if (value != null && value >= 0) {
+        _log('FTP: Free space (from AVLB): $value bytes');
+        return value;
+      }
+
+      _log('FTP: AVLB: could not parse free space from response');
+    } catch (e) {
+      _log('FTP: AVLB failed: $e');
     }
     return null;
   }
@@ -209,8 +224,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     ValueNotifier<double> progressNotifier,
   ) async {
     final int? free = await _getFtpFreeSpace(ftp);
+    _log('FTP: Space check: free=${free ?? "unknown"} bytes, required=$requiredBytes bytes');
     if (free == null) return (ok: true, free: null, required: requiredBytes);
-    if (free >= requiredBytes) return (ok: true, free: free, required: requiredBytes);
+    if (free >= requiredBytes) {
+      _log('FTP: Space check passed');
+      return (ok: true, free: free, required: requiredBytes);
+    }
 
     progressNotifier.value = -1; // signal "checking space" for UI if needed
     String? manifestFileName;
@@ -261,6 +280,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         return (ok: true, free: free, required: requiredBytes);
       } catch (_) {}
     }
+    _log('FTP: Space check failed: insufficient space (free=$free, required=$requiredBytes)');
     return (ok: false, free: free, required: requiredBytes);
   }
 
@@ -346,8 +366,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         ftp.transferMode = TransferMode.passive;
       } catch (_) {}
 
-      // TODO: временно отключена проверка свободного места на FTP
-      const bool _checkFtpFreeSpace = false;
+      const bool _checkFtpFreeSpace = true;
       if (_checkFtpFreeSpace) {
         final spaceResult = await _ensureFtpSpaceForUpload(
           ftp, requiredBytes, progressNotifier,
@@ -372,6 +391,47 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           return;
         }
       }
+
+      // Ensure previous update file does not block new upload
+      try {
+        final bool existsUpdate = await ftp.existFile('UPDATE.FW');
+        _log('FTP: UPDATE.FW exists before upload: $existsUpdate');
+        if (existsUpdate) {
+          final bool deleted = await ftp.deleteFile('UPDATE.FW');
+          _log('FTP: DELETE UPDATE.FW result: $deleted');
+          if (!deleted) {
+            uploadFtpRef = null;
+            try { await ftp.disconnect(); } catch (_) {}
+            if (mounted) {
+              Navigator.of(context).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'Невозможно загрузить обновление: файл UPDATE.FW не удалось удалить',
+                  ),
+                ),
+              );
+            }
+            return;
+          }
+        }
+      } catch (e) {
+        _log('FTP: Error checking/deleting UPDATE.FW: $e');
+        uploadFtpRef = null;
+        try { await ftp.disconnect(); } catch (_) {}
+        if (mounted) {
+          Navigator.of(context).pop();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Невозможно загрузить обновление: ошибка при удалении UPDATE.FW',
+              ),
+            ),
+          );
+        }
+        return;
+      }
+
       progressNotifier.value = 0.0;
 
       final bool uploaded = await ftp.uploadFile(
