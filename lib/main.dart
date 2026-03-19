@@ -485,6 +485,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       bool renamed = false;
       if (uploaded) {
         renamed = await ftp.rename('UPDATE.FW.INCOMPLETE', 'UPDATE.FW');
+         await ftp.sendCustomCommand('REBT');
       }
 
       uploadFtpRef = null;
