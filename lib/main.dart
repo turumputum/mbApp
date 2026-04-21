@@ -689,12 +689,24 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
+  final File _logFile = File('modulebox.log');
+
   void _log(String message) {
     final String time = DateTime.now().toIso8601String().substring(11, 19);
     final String logMessage = '$time  $message';
     
-    // Print to console only (UI logs panel removed)
+    // Print to console
     print(logMessage);
+    // Also append to log file
+    unawaited(_appendLogLine(logMessage));
+  }
+
+  Future<void> _appendLogLine(String line) async {
+    try {
+      await _logFile.writeAsString('$line\n', mode: FileMode.append, flush: false);
+    } catch (_) {
+      // Ignore log file IO errors
+    }
   }
 
   @override
