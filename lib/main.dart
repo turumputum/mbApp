@@ -86,6 +86,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Timer? _overlayTimer;
   Timer? _consoleAutocompleteTimer;
   Timer? _backgroundScanTimer;
+  Timer? _serialPresenceTimer;
   String _lastText = '';
   TextSelection? _lastSelection;
   List<String> _cachedSuggestions = [];
@@ -1872,6 +1873,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       } else {
         timer.cancel();
       }
+    });
+
+    // Fast lightweight monitor: detect missing tty/COM quickly without probing ports.
+    _serialPresenceTimer = Timer.periodic(const Duration(seconds: 1), (Timer timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      final Set<String> availablePorts = SerialPort.availablePorts.toSet();
+      _removeUnavailableSerialDevices(availablePorts);
     });
   }
 
@@ -4594,6 +4605,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   @override
   void dispose() {
     _backgroundScanTimer?.cancel();
+    _serialPresenceTimer?.cancel();
     _stopSerialConsole();
     _saveConsoleHistory();
     _consoleScrollController.dispose();
