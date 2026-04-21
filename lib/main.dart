@@ -657,6 +657,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   StreamSubscription<RawSocketEvent>? _mdnsSocketSubscription;
   int _mdnsPacketCount = 0;
   final Set<String> _mdnsDiscoveredDevices = <String>{}; // Track discovered device IDs
+  final Map<String, int> _mdnsMissedScans = <String, int>{}; // Consecutive not-found counters
+  static const int _mdnsMissThreshold = 2;
   
   // Temporary storage for parsed records during packet parsing
   final List<Map<String, dynamic>> _ptrRecords = [];
@@ -2140,6 +2142,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Future<void> _scanMdnsBroadcasts() async {
     try {
       _log('mDNS: Starting discovery on ${Platform.operatingSystem}...');
+      // This set is used per scan cycle to avoid duplicates and detect missing devices.
+      _mdnsDiscoveredDevices.clear();
       
       final Set<String> uniqueDeviceIds = <String>{}; // Track unique device identifiers
       final List<String> serviceTypes = ['_ftp._tcp'];
@@ -2199,10 +2203,56 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         }
       }
       
+      _pruneMissingMdnsDevices();
       _log('mDNS: scan finished.');
     } catch (e, stackTrace) {
       _log('mDNS: error: $e');
       _log('mDNS: stack trace: $stackTrace');
+    }
+  }
+
+  void _pruneMissingMdnsDevices() {
+    final List<DeviceItem> mdnsDevices = _devices
+        .where((DeviceItem d) => d.kind == 'mDNS')
+        .toList(growable: false);
+    final List<String> toRemove = <String>[];
+
+    for (final DeviceItem d in mdnsDevices) {
+      final String id = d.identifier;
+      if (_mdnsDiscoveredDevices.contains(id)) {
+        _mdnsMissedScans[id] = 0;
+        continue;
+      }
+
+      final int missed = (_mdnsMissedScans[id] ?? 0) + 1;
+      _mdnsMissedScans[id] = missed;
+      _log('mDNS: device $id missed $missed/${_mdnsMissThreshold} scan(s)');
+
+      final bool isSelected = _selected != null && _selected!.identifier == id && _selected!.kind == 'mDNS';
+      final bool hasUnsavedConfig = _isConfigEditorDirty || _isConfigDesignDirty;
+      if (isSelected && hasUnsavedConfig) {
+        _log('mDNS: keep selected dirty device $id in list');
+        continue;
+      }
+
+      if (missed >= _mdnsMissThreshold) {
+        toRemove.add(id);
+      }
+    }
+
+    if (toRemove.isEmpty) return;
+    setState(() {
+      _devices.removeWhere((DeviceItem d) => d.kind == 'mDNS' && toRemove.contains(d.identifier));
+      if (_selected != null &&
+          _selected!.kind == 'mDNS' &&
+          toRemove.contains(_selected!.identifier) &&
+          !(_isConfigEditorDirty || _isConfigDesignDirty)) {
+        _selected = _devices.isNotEmpty ? _devices.first : null;
+      }
+    });
+    for (final String id in toRemove) {
+      _mdnsMissedScans.remove(id);
+      _log('mDNS: removed stale device $id after $_mdnsMissThreshold missed scans');
     }
   }
 
@@ -2278,7 +2328,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Discovery'),
+        title: const Text('Devices'),
       ),
       body: Stack(
         children: <Widget>[
@@ -2291,15 +2341,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   width: 320,
                   child: Column(
                     children: <Widget>[
-                      Container(
-                        height: 48,
-                        alignment: Alignment.centerLeft,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        child: Text(
-                          _isScanning ? 'Scanning…' : 'Devices',
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
-                      ),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         child: SegmentedButton<DeviceListFilter>(
