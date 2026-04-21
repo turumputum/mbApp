@@ -888,6 +888,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 _log('mDNS: ===== Received packet #$_mdnsPacketCount =====');
                 _log('mDNS: From: ${datagram.address.address}:${datagram.port}');
                 _log('mDNS: Size: ${datagram.data.length} bytes');
+                _logDnsPacketDetails('RX(win)', datagram.data);
                 
                 // Parse DNS packet details, then extract devices
                 final Map<String, dynamic>? parsedData = _parseAndLogDnsPacket(datagram.data);
@@ -971,6 +972,25 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     } catch (e) {
       return -1;
     }
+  }
+
+  /// Detailed DNS packet dump for Windows RawDatagramSocket mDNS path.
+  void _logDnsPacketDetails(String direction, Uint8List data) {
+    _log('mDNS: [$direction] packet length: ${data.length} bytes');
+    _log('mDNS: [$direction] hex: ${data.map((int b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}');
+    if (data.length < 12) return;
+    final int id = (data[0] << 8) | data[1];
+    final int flags = (data[2] << 8) | data[3];
+    final int questions = (data[4] << 8) | data[5];
+    final int answerRRs = (data[6] << 8) | data[7];
+    final int authorityRRs = (data[8] << 8) | data[9];
+    final int additionalRRs = (data[10] << 8) | data[11];
+    final bool isResponse = (flags & 0x8000) != 0;
+    _log(
+      'mDNS: [$direction] header: id=0x${id.toRadixString(16).padLeft(4, '0')}, '
+      'flags=0x${flags.toRadixString(16).padLeft(4, '0')} (${isResponse ? "response" : "query"}), '
+      'qd=$questions, an=$answerRRs, ns=$authorityRRs, ar=$additionalRRs',
+    );
   }
   
   /// Parse and log DNS packet details, returns parsed device data if found
@@ -2117,6 +2137,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       // Get the local port of the socket to log it
       final int localPort = socket.port;
       _log('mDNS: Sending query from local port $localPort to ${multicastAddress.address}:$mdnsPort');
+      _logDnsPacketDetails('TX(manual)', Uint8List.fromList(packet));
       
       final int bytesSent = socket.send(
         Uint8List.fromList(packet),
@@ -2176,6 +2197,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       // Send to mDNS multicast address
       final InternetAddress multicastAddress = InternetAddress('224.0.0.251');
       const int mdnsPort = 5353;
+      _logDnsPacketDetails('TX(socket)', Uint8List.fromList(packet));
       
       final int bytesSent = socket.send(
         Uint8List.fromList(packet),
