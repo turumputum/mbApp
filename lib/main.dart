@@ -1903,6 +1903,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   Future<void> _scanSerialPorts() async {
     final List<String> ports = SerialPort.availablePorts.toList(growable: false);
+    final Set<String> availablePorts = ports.toSet();
     //_log('Serial: ${ports.length} port(s) detected.');
     
     // Filter out ports that are in use by console
@@ -1919,8 +1920,40 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       portsToScan.map((String portName) => _scanSingleSerialPort(portName)),
       eagerError: false, // Continue scanning other ports even if one fails
     );
+
+    _removeUnavailableSerialDevices(availablePorts);
     
     //_log('Serial: scan finished.');
+  }
+
+  /// Remove serial devices immediately when their tty/COM port is gone.
+  /// No dirty-check exception: missing port means device is unavailable.
+  void _removeUnavailableSerialDevices(Set<String> availablePorts) {
+    final List<String> removedIds = _devices
+        .where((DeviceItem d) => d.kind == 'serial' && !availablePorts.contains(d.identifier))
+        .map((DeviceItem d) => d.identifier)
+        .toList(growable: false);
+    if (removedIds.isEmpty) return;
+
+    final bool selectedRemoved = _selected != null &&
+        _selected!.kind == 'serial' &&
+        removedIds.contains(_selected!.identifier);
+    if (selectedRemoved) {
+      _log('Serial: selected device ${_selected!.identifier} became unavailable; dropping unsaved edits');
+      _clearConfigTabContent();
+    }
+
+    setState(() {
+      _devices.removeWhere((DeviceItem d) => d.kind == 'serial' && removedIds.contains(d.identifier));
+      if (_selected != null && _selected!.kind == 'serial' && removedIds.contains(_selected!.identifier)) {
+        _selected = _devices.isNotEmpty ? _devices.first : null;
+        _currentDetailsTabIndex = 0;
+      }
+    });
+
+    for (final String id in removedIds) {
+      _log('Serial: removed unavailable device $id (port missing)');
+    }
   }
 
   /// Scan a single serial port for moduleBox devices
