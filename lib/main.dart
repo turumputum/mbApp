@@ -1640,6 +1640,25 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return 'Строка $_currentEditorCursorLine: ${messages.join(' | ')}';
   }
 
+  bool _isOptionValueMatchingType(String value, String valueType) {
+    final String normalizedType = valueType.toLowerCase();
+    if (normalizedType == 'flag') {
+      final String normalizedValue = value.toLowerCase();
+      return normalizedValue == 'yes' || normalizedValue == 'no';
+    }
+    if (normalizedType == 'int') {
+      return int.tryParse(value) != null;
+    }
+    if (normalizedType == 'float') {
+      return double.tryParse(value) != null;
+    }
+    return true;
+  }
+
+  bool _isExplicitEmptyValue(String value) {
+    return value.trim().toLowerCase() == 'empty';
+  }
+
   void _handleDetailsTabChangeSerial() {
     if (!_detailsTabControllerSerial.indexIsChanging &&
         _detailsTabControllerSerial.index != _currentDetailsTabIndex) {
@@ -3131,6 +3150,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final Set<String> seenChapters = <String>{};
     final Map<String, Set<String>> chapterKeys = <String, Set<String>>{};
     final Map<String, ({String modeValue, int lineNumber})> slotModes = <String, ({String modeValue, int lineNumber})>{};
+    final Map<String, ({String optionsValue, int lineNumber})> slotOptions = <String, ({String optionsValue, int lineNumber})>{};
 
     for (int index = 0; index < lines.length; index++) {
       final int lineNumber = index + 1;
@@ -3210,13 +3230,23 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         chapterKeys[currentChapter] = keys;
       }
 
-      if (currentChapter.startsWith('SLOT_') && key.toLowerCase() == 'mode' && value.isNotEmpty) {
+      if (currentChapter.startsWith('SLOT_') &&
+          key.toLowerCase() == 'mode' &&
+          value.isNotEmpty &&
+          !_isExplicitEmptyValue(value)) {
         slotModes[currentChapter] = (modeValue: value, lineNumber: lineNumber);
+      }
+      if (currentChapter.startsWith('SLOT_') &&
+          key.toLowerCase() == 'options' &&
+          value.isNotEmpty &&
+          !_isExplicitEmptyValue(value)) {
+        slotOptions[currentChapter] = (optionsValue: value, lineNumber: lineNumber);
       }
     }
 
     if (_manifestData.containsKey('modes') && _manifestData['modes'] is List) {
       final Map<String, String> slotsFieldByMode = <String, String>{};
+      final Map<String, Map<String, String>> optionTypesByMode = <String, Map<String, String>>{};
       final List<dynamic> modesArray = _manifestData['modes'] as List<dynamic>;
       for (final dynamic modeItem in modesArray) {
         if (modeItem is Map<String, dynamic>) {
@@ -3224,6 +3254,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           final String? slotsField = modeItem['slots']?.toString();
           if (modeName != null && modeName.isNotEmpty) {
             slotsFieldByMode[modeName] = slotsField ?? '';
+            final Map<String, String> optionTypes = <String, String>{};
+            if (modeItem['options'] is List) {
+              for (final dynamic optionItem in modeItem['options'] as List<dynamic>) {
+                if (optionItem is Map<String, dynamic>) {
+                  final String? optionName = optionItem['name']?.toString();
+                  if (optionName != null && optionName.isNotEmpty) {
+                    optionTypes[optionName] = optionItem['valueType']?.toString() ?? 'string';
+                  }
+                }
+              }
+            }
+            optionTypesByMode[modeName] = optionTypes;
           }
         }
       }
@@ -3252,6 +3294,85 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             lineNumber: lineNumber,
             message: 'Mode "$modeValue" недопустим для $slotChapter (manifest slots: $slotsField)',
           ));
+        }
+      }
+
+      for (final MapEntry<String, ({String optionsValue, int lineNumber})> entry in slotOptions.entries) {
+        final String slotChapter = entry.key;
+        final String optionsValue = entry.value.optionsValue;
+        final int lineNumber = entry.value.lineNumber;
+        final ({String modeValue, int lineNumber})? modeInfo = slotModes[slotChapter];
+        if (modeInfo == null || modeInfo.modeValue.isEmpty) {
+          issues.add(ConfigValidationIssue(
+            lineNumber: lineNumber,
+            message: 'Нельзя проверить options без выбранного mode в $slotChapter',
+          ));
+          continue;
+        }
+
+        final String modeValue = modeInfo.modeValue;
+        final Map<String, String>? allowedOptions = optionTypesByMode[modeValue];
+        if (allowedOptions == null) {
+          continue;
+        }
+
+        final Set<String> usedOptionNames = <String>{};
+        final List<String> optionTokens = optionsValue
+            .split(',')
+            .map((String token) => token.trim())
+            .where((String token) => token.isNotEmpty)
+            .toList();
+
+        for (final String token in optionTokens) {
+          if (!token.contains(':')) {
+            issues.add(ConfigValidationIssue(
+              lineNumber: lineNumber,
+              message: 'Неверный формат option "$token". Ожидается name:value',
+            ));
+            continue;
+          }
+
+          final int delimiterIndex = token.indexOf(':');
+          final String optionName = token.substring(0, delimiterIndex).trim();
+          final String optionRawValue = token.substring(delimiterIndex + 1).trim();
+          if (optionName.isEmpty) {
+            issues.add(ConfigValidationIssue(
+              lineNumber: lineNumber,
+              message: 'Пустое имя option в "$token"',
+            ));
+            continue;
+          }
+          if (optionRawValue.isEmpty) {
+            issues.add(ConfigValidationIssue(
+              lineNumber: lineNumber,
+              message: 'Пустое значение option "$optionName"',
+            ));
+            continue;
+          }
+          if (usedOptionNames.contains(optionName.toLowerCase())) {
+            issues.add(ConfigValidationIssue(
+              lineNumber: lineNumber,
+              message: 'Повтор option "$optionName" в строке options',
+            ));
+            continue;
+          }
+          usedOptionNames.add(optionName.toLowerCase());
+
+          final String? valueType = allowedOptions[optionName];
+          if (valueType == null) {
+            issues.add(ConfigValidationIssue(
+              lineNumber: lineNumber,
+              message: 'Option "$optionName" недоступен для mode "$modeValue"',
+            ));
+            continue;
+          }
+
+          if (!_isOptionValueMatchingType(optionRawValue, valueType)) {
+            issues.add(ConfigValidationIssue(
+              lineNumber: lineNumber,
+              message: 'Значение "$optionRawValue" не соответствует типу "$valueType" для "$optionName"',
+            ));
+          }
         }
       }
     }
