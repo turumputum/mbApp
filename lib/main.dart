@@ -3130,6 +3130,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     String? currentChapter;
     final Set<String> seenChapters = <String>{};
     final Map<String, Set<String>> chapterKeys = <String, Set<String>>{};
+    final Map<String, ({String modeValue, int lineNumber})> slotModes = <String, ({String modeValue, int lineNumber})>{};
 
     for (int index = 0; index < lines.length; index++) {
       final int lineNumber = index + 1;
@@ -3189,6 +3190,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
       final int eqIdx = trimmed.indexOf('=');
       final String key = trimmed.substring(0, eqIdx).trim();
+      final String value = trimmed.substring(eqIdx + 1).trim();
       if (key.isEmpty) {
         issues.add(ConfigValidationIssue(
           lineNumber: lineNumber,
@@ -3206,6 +3208,51 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       } else {
         keys.add(key);
         chapterKeys[currentChapter] = keys;
+      }
+
+      if (currentChapter.startsWith('SLOT_') && key.toLowerCase() == 'mode' && value.isNotEmpty) {
+        slotModes[currentChapter] = (modeValue: value, lineNumber: lineNumber);
+      }
+    }
+
+    if (_manifestData.containsKey('modes') && _manifestData['modes'] is List) {
+      final Map<String, String> slotsFieldByMode = <String, String>{};
+      final List<dynamic> modesArray = _manifestData['modes'] as List<dynamic>;
+      for (final dynamic modeItem in modesArray) {
+        if (modeItem is Map<String, dynamic>) {
+          final String? modeName = modeItem['mode']?.toString();
+          final String? slotsField = modeItem['slots']?.toString();
+          if (modeName != null && modeName.isNotEmpty) {
+            slotsFieldByMode[modeName] = slotsField ?? '';
+          }
+        }
+      }
+
+      for (final MapEntry<String, ({String modeValue, int lineNumber})> entry in slotModes.entries) {
+        final String slotChapter = entry.key;
+        final String modeValue = entry.value.modeValue;
+        final int lineNumber = entry.value.lineNumber;
+        final String slotNumber = _extractSlotNumber(slotChapter);
+
+        if (slotNumber.isEmpty) {
+          continue;
+        }
+
+        final String? slotsField = slotsFieldByMode[modeValue];
+        if (slotsField == null) {
+          issues.add(ConfigValidationIssue(
+            lineNumber: lineNumber,
+            message: 'Mode "$modeValue" не найден в manifest.modes',
+          ));
+          continue;
+        }
+
+        if (slotsField.isNotEmpty && !_isSlotValidForMode(slotNumber, slotsField)) {
+          issues.add(ConfigValidationIssue(
+            lineNumber: lineNumber,
+            message: 'Mode "$modeValue" недопустим для $slotChapter (manifest slots: $slotsField)',
+          ));
+        }
       }
     }
 
