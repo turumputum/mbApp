@@ -60,6 +60,63 @@ class DeviceItem {
   final Map<String, Object?> extra; // any details
 }
 
+class ConfigValidationIssue {
+  ConfigValidationIssue({
+    required this.lineNumber,
+    required this.message,
+  });
+
+  final int lineNumber;
+  final String message;
+}
+
+class ConfigEditorController extends TextEditingController {
+  Set<int> _errorLines = <int>{};
+
+  void setErrorLines(Set<int> lines) {
+    if (_errorLines.length == lines.length && _errorLines.containsAll(lines)) {
+      return;
+    }
+    _errorLines = Set<int>.from(lines);
+    notifyListeners();
+  }
+
+  @override
+  TextSpan buildTextSpan({
+    required BuildContext context,
+    TextStyle? style,
+    required bool withComposing,
+  }) {
+    final TextStyle baseStyle = style ?? const TextStyle();
+    final TextStyle errorStyle = baseStyle.copyWith(
+      decoration: TextDecoration.underline,
+      decorationColor: Colors.red.shade400,
+      decorationStyle: TextDecorationStyle.wavy,
+      decorationThickness: 1.8,
+    );
+
+    final List<InlineSpan> children = <InlineSpan>[];
+    final String textValue = text;
+    if (textValue.isEmpty) {
+      return TextSpan(style: baseStyle, text: textValue);
+    }
+
+    final List<String> lines = textValue.split('\n');
+    for (int i = 0; i < lines.length; i++) {
+      final bool hasError = _errorLines.contains(i + 1);
+      children.add(TextSpan(
+        text: lines[i],
+        style: hasError ? errorStyle : baseStyle,
+      ));
+      if (i < lines.length - 1) {
+        children.add(const TextSpan(text: '\n'));
+      }
+    }
+
+    return TextSpan(style: baseStyle, children: children);
+  }
+}
+
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -79,7 +136,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   DeviceItem? _selected;
   bool _isScanning = false;
   final ScrollController _suggestionScrollController = ScrollController();
-  final TextEditingController _configEditorController = TextEditingController();
+  final ConfigEditorController _configEditorController = ConfigEditorController();
   final FocusNode _configEditorFocusNode = FocusNode();
   final ScrollController _textEditorScrollController = ScrollController();
   Timer? _autocompleteTimer;
@@ -116,6 +173,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   String? _cachedConfigContent;
   String? _cachedManifestPath; // TODO: Use for device manifest display
   String? _cachedConfigPath;
+  Set<int> _configValidationErrorLines = <int>{};
+  List<ConfigValidationIssue> _configValidationIssues = <ConfigValidationIssue>[];
+  Map<int, List<String>> _configValidationMessagesByLine = <int, List<String>>{};
+  int _currentEditorCursorLine = 1;
 
   /// Firmware version from manifest path (e.g. manifest-3.35.json → "3.35")
   String? get _deviceFirmwareVersionFromManifest {
@@ -1508,6 +1569,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       if (_suspendEditorDirtyTracking) {
         _lastText = currentText;
         _lastSelection = currentSelection;
+        _updateCurrentEditorCursorLine(currentText, currentSelection);
         return;
       }
       
@@ -1522,6 +1584,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       }
       
       if (currentText != _lastText) {
+        if (_configValidationErrorLines.isNotEmpty || _configValidationIssues.isNotEmpty) {
+          setState(() {
+            _configValidationErrorLines = <int>{};
+            _configValidationIssues = <ConfigValidationIssue>[];
+            _configValidationMessagesByLine = <int, List<String>>{};
+            _configEditorController.setErrorLines(_configValidationErrorLines);
+          });
+        }
         _refreshEditorDirtyState(currentText: currentText);
         // Check if mode= was changed by comparing mode values in all SLOT chapters
         bool modeChanged = _detectModeChange(_lastText, currentText);
@@ -1546,8 +1616,28 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         });
       } else {
         _lastSelection = currentSelection;
+        _updateCurrentEditorCursorLine(currentText, currentSelection);
       }
     });
+  }
+
+  void _updateCurrentEditorCursorLine(String text, TextSelection selection) {
+    final int baseOffset = selection.baseOffset;
+    final int safeOffset = baseOffset < 0 ? 0 : (baseOffset > text.length ? text.length : baseOffset);
+    final int line = '\n'.allMatches(text.substring(0, safeOffset)).length + 1;
+    if (line != _currentEditorCursorLine) {
+      setState(() {
+        _currentEditorCursorLine = line;
+      });
+    }
+  }
+
+  String? _getValidationStatusMessageForCurrentLine() {
+    final List<String>? messages = _configValidationMessagesByLine[_currentEditorCursorLine];
+    if (messages == null || messages.isEmpty) {
+      return null;
+    }
+    return 'Строка $_currentEditorCursorLine: ${messages.join(' | ')}';
   }
 
   void _handleDetailsTabChangeSerial() {
@@ -2923,6 +3013,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         Row(
           mainAxisAlignment: MainAxisAlignment.end,
           children: <Widget>[
+            OutlinedButton.icon(
+              onPressed: _runConfigValidation,
+              icon: const Icon(Icons.verified),
+              label: const Text('Проверить'),
+            ),
+            const SizedBox(width: 8),
             _buildSaveButton(canSaveEditor ? _saveConfigFromEditor : null),
           ],
         ),
@@ -2977,37 +3073,169 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             ),
           ),
           // Status bar with autocomplete info
-          Container(
-            height: 24,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            decoration: BoxDecoration(
-              color: Colors.blue[50],
-              borderRadius: const BorderRadius.only(
-                bottomLeft: Radius.circular(8),
-                bottomRight: Radius.circular(8),
-              ),
-              border: Border(top: BorderSide(color: Colors.blue[200]!)),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.auto_awesome, size: 12, color: Colors.blue[600]),
-                const SizedBox(width: 4),
-                Text(
-                  _currentSuggestions.isNotEmpty
-                    ? '${_currentSuggestions.length} suggestion(s) for "$_currentWord"'
-                    : 'Start editing to see what happens',
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: Colors.blue[700],
-                    fontWeight: FontWeight.w500,
+          Builder(
+            builder: (BuildContext context) {
+              final String? validationStatus = _getValidationStatusMessageForCurrentLine();
+              final bool hasValidationError = validationStatus != null;
+              return Container(
+                height: 24,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                decoration: BoxDecoration(
+                  color: hasValidationError ? Colors.red[50] : Colors.blue[50],
+                  borderRadius: const BorderRadius.only(
+                    bottomLeft: Radius.circular(8),
+                    bottomRight: Radius.circular(8),
+                  ),
+                  border: Border(
+                    top: BorderSide(color: hasValidationError ? Colors.red[200]! : Colors.blue[200]!),
                   ),
                 ),
-              ],
-            ),
+                child: Row(
+                  children: [
+                    Icon(
+                      hasValidationError ? Icons.error_outline : Icons.auto_awesome,
+                      size: 12,
+                      color: hasValidationError ? Colors.red[700] : Colors.blue[600],
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        hasValidationError
+                            ? validationStatus
+                            : (_currentSuggestions.isNotEmpty
+                                ? '${_currentSuggestions.length} suggestion(s) for "$_currentWord"'
+                                : 'Start editing to see what happens'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: hasValidationError ? Colors.red[700] : Colors.blue[700],
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
         ],
       ),
     );
+  }
+
+  List<ConfigValidationIssue> _validateConfigFormat(String content) {
+    final List<ConfigValidationIssue> issues = <ConfigValidationIssue>[];
+    final List<String> lines = content.split('\n');
+    String? currentChapter;
+    final Set<String> seenChapters = <String>{};
+    final Map<String, Set<String>> chapterKeys = <String, Set<String>>{};
+
+    for (int index = 0; index < lines.length; index++) {
+      final int lineNumber = index + 1;
+      final String rawLine = lines[index];
+      final String trimmed = rawLine.trim();
+
+      if (trimmed.isEmpty || trimmed.startsWith('#') || trimmed.startsWith(';')) {
+        continue;
+      }
+
+      if (trimmed.startsWith('[') || trimmed.endsWith(']')) {
+        if (!(trimmed.startsWith('[') && trimmed.endsWith(']') && trimmed.length > 2)) {
+          issues.add(ConfigValidationIssue(
+            lineNumber: lineNumber,
+            message: 'Неверный формат секции. Используйте [section_name]',
+          ));
+          continue;
+        }
+
+        final String chapterName = trimmed.substring(1, trimmed.length - 1).trim();
+        if (chapterName.isEmpty) {
+          issues.add(ConfigValidationIssue(
+            lineNumber: lineNumber,
+            message: 'Имя секции не может быть пустым',
+          ));
+          continue;
+        }
+
+        if (seenChapters.contains(chapterName)) {
+          issues.add(ConfigValidationIssue(
+            lineNumber: lineNumber,
+            message: 'Повторяющаяся секция [$chapterName]',
+          ));
+        } else {
+          seenChapters.add(chapterName);
+          chapterKeys[chapterName] = <String>{};
+        }
+        currentChapter = chapterName;
+        continue;
+      }
+
+      if (!trimmed.contains('=')) {
+        issues.add(ConfigValidationIssue(
+          lineNumber: lineNumber,
+          message: 'Ожидается пара key=value',
+        ));
+        continue;
+      }
+
+      if (currentChapter == null) {
+        issues.add(ConfigValidationIssue(
+          lineNumber: lineNumber,
+          message: 'Параметр должен находиться внутри секции [section]',
+        ));
+        continue;
+      }
+
+      final int eqIdx = trimmed.indexOf('=');
+      final String key = trimmed.substring(0, eqIdx).trim();
+      if (key.isEmpty) {
+        issues.add(ConfigValidationIssue(
+          lineNumber: lineNumber,
+          message: 'Ключ перед "=" не может быть пустым',
+        ));
+        continue;
+      }
+
+      final Set<String> keys = chapterKeys[currentChapter] ?? <String>{};
+      if (keys.contains(key)) {
+        issues.add(ConfigValidationIssue(
+          lineNumber: lineNumber,
+          message: 'Повторяющийся ключ "$key" в секции [$currentChapter]',
+        ));
+      } else {
+        keys.add(key);
+        chapterKeys[currentChapter] = keys;
+      }
+    }
+
+    return issues;
+  }
+
+  void _runConfigValidation() {
+    final List<ConfigValidationIssue> issues = _validateConfigFormat(_configEditorController.text);
+    final Set<int> errorLines = issues.map((ConfigValidationIssue issue) => issue.lineNumber).toSet();
+    final Map<int, List<String>> messagesByLine = <int, List<String>>{};
+    for (final ConfigValidationIssue issue in issues) {
+      messagesByLine.putIfAbsent(issue.lineNumber, () => <String>[]).add(issue.message);
+    }
+
+    setState(() {
+      _configValidationIssues = issues;
+      _configValidationErrorLines = errorLines;
+      _configValidationMessagesByLine = messagesByLine;
+      _configEditorController.setErrorLines(_configValidationErrorLines);
+    });
+
+    if (issues.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Проверка пройдена: формат конфигурации корректный')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Найдено ошибок: ${issues.length}')),
+      );
+    }
   }
 
   /// Get autocomplete suggestions (same data sources as Config design tab)
