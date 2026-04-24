@@ -1662,6 +1662,121 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return allowedValues.contains(value);
   }
 
+  List<String> _validateSingleCrossLinkRule(
+    String rule, {
+    required Set<String> availableSlots,
+  }) {
+    final List<String> errors = <String>[];
+    final String trimmedRule = rule.trim();
+    if (trimmedRule.isEmpty) {
+      errors.add('Пустое правило crosslink');
+      return errors;
+    }
+
+    final List<String> arrowParts = trimmedRule.split('->');
+    if (arrowParts.length != 2) {
+      errors.add('Неверный формат правила "$trimmedRule". Ожидается source->target');
+      return errors;
+    }
+
+    final String sourcePart = arrowParts[0].trim();
+    final String targetPart = arrowParts[1].trim();
+    if (sourcePart.isEmpty || targetPart.isEmpty) {
+      errors.add('Неполное правило "$trimmedRule": source и target обязательны');
+      return errors;
+    }
+
+    final int sourceValueDelimiter = sourcePart.indexOf(':');
+    if (sourceValueDelimiter <= 0) {
+      errors.add('Неверный source в "$trimmedRule". Ожидается slot[/report]:value');
+      return errors;
+    }
+
+    final String sourceLeft = sourcePart.substring(0, sourceValueDelimiter).trim();
+    final String sourceValue = sourcePart.substring(sourceValueDelimiter + 1).trim();
+    if (sourceValue.isEmpty) {
+      errors.add('Пустое source value в "$trimmedRule"');
+    }
+
+    final List<String> sourceSegments = sourceLeft.split('/');
+    final String sourceSlot = sourceSegments.first.trim();
+    final String? sourceReport = sourceSegments.length > 1 ? sourceSegments[1].trim() : null;
+    if (sourceSlot.isEmpty) {
+      errors.add('Пустой source slot в "$trimmedRule"');
+      return errors;
+    }
+
+    if (!availableSlots.contains(sourceSlot)) {
+      errors.add('Source slot "$sourceSlot" не найден');
+      return errors;
+    }
+
+    if (sourceReport != null && sourceReport.isNotEmpty) {
+      final Set<String> availableReports = _getReportTopicsForSourceSlot(sourceSlot)
+          .where((String item) => item.isNotEmpty)
+          .toSet();
+      if (!availableReports.contains(sourceReport)) {
+        errors.add('Source report "$sourceReport" недоступен для "$sourceSlot"');
+      }
+    }
+
+    final Set<String> availableSourceValues = _getTopicValuesFromSlotSilent(sourceSlot).toSet();
+    if (sourceValue.toLowerCase() != 'empty' &&
+        availableSourceValues.isNotEmpty &&
+        !availableSourceValues.contains(sourceValue)) {
+      errors.add('Source value "$sourceValue" недоступен для "$sourceSlot"');
+    }
+
+    final int targetEqDelimiter = targetPart.indexOf('=');
+    final int targetColonDelimiter = targetPart.indexOf(':');
+    int targetValueDelimiter = -1;
+    if (targetEqDelimiter > 0) {
+      targetValueDelimiter = targetEqDelimiter;
+    } else if (targetColonDelimiter > 0) {
+      targetValueDelimiter = targetColonDelimiter;
+    }
+
+    final String targetLeft = targetValueDelimiter > 0
+        ? targetPart.substring(0, targetValueDelimiter).trim()
+        : targetPart;
+    final String? targetValue = targetValueDelimiter > 0
+        ? targetPart.substring(targetValueDelimiter + 1).trim()
+        : null;
+
+    final List<String> targetSegments = targetLeft.split('/');
+    final String targetSlot = targetSegments.first.trim();
+    final String? targetCommand = targetSegments.length > 1 ? targetSegments[1].trim() : null;
+    if (targetSlot.isEmpty) {
+      errors.add('Пустой target slot в "$trimmedRule"');
+      return errors;
+    }
+
+    if (!availableSlots.contains(targetSlot)) {
+      errors.add('Target slot "$targetSlot" не найден');
+      return errors;
+    }
+
+    if (targetCommand != null && targetCommand.isNotEmpty) {
+      final Set<String> availableCommands = _getTargetCommandsForSlot(targetSlot)
+          .where((String item) => item.isNotEmpty)
+          .toSet();
+      if (!availableCommands.contains(targetCommand)) {
+        errors.add('Target command "$targetCommand" недоступен для "$targetSlot"');
+      }
+    }
+
+    final Set<String> availableTargetValues = _getTopicValuesFromSlotSilent(targetSlot).toSet();
+    if (targetValue != null &&
+        targetValue.isNotEmpty &&
+        targetValue.toLowerCase() != 'empty' &&
+        availableTargetValues.isNotEmpty &&
+        !availableTargetValues.contains(targetValue)) {
+      errors.add('Target value "$targetValue" недоступен для "$targetSlot"');
+    }
+
+    return errors;
+  }
+
   bool _isExplicitEmptyValue(String value) {
     return value.trim().toLowerCase() == 'empty';
   }
@@ -3158,6 +3273,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final Map<String, Set<String>> chapterKeys = <String, Set<String>>{};
     final Map<String, ({String modeValue, int lineNumber})> slotModes = <String, ({String modeValue, int lineNumber})>{};
     final Map<String, ({String optionsValue, int lineNumber})> slotOptions = <String, ({String optionsValue, int lineNumber})>{};
+    final Map<String, ({String crossLinkValue, int lineNumber})> slotCrossLinks = <String, ({String crossLinkValue, int lineNumber})>{};
 
     for (int index = 0; index < lines.length; index++) {
       final int lineNumber = index + 1;
@@ -3248,6 +3364,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           value.isNotEmpty &&
           !_isExplicitEmptyValue(value)) {
         slotOptions[currentChapter] = (optionsValue: value, lineNumber: lineNumber);
+      }
+      if (currentChapter.startsWith('SLOT_') &&
+          key.toLowerCase() == 'crosslink' &&
+          value.isNotEmpty &&
+          !_isExplicitEmptyValue(value)) {
+        slotCrossLinks[currentChapter] = (crossLinkValue: value, lineNumber: lineNumber);
       }
     }
 
@@ -3402,6 +3524,38 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 message: 'Значение "$optionRawValue" недопустимо для "$optionName". Допустимые: ${allowedValues.join(', ')}',
               ));
             }
+          }
+        }
+      }
+
+      final Set<String> availableSlots = <String>{..._getTopicBasedSourceSlots()};
+      availableSlots.addAll(seenChapters.where((String chapter) => chapter.startsWith('SLOT_')));
+      for (final MapEntry<String, ({String crossLinkValue, int lineNumber})> entry in slotCrossLinks.entries) {
+        final int lineNumber = entry.value.lineNumber;
+        final List<String> rules = entry.value.crossLinkValue
+            .split(',')
+            .map((String token) => token.trim())
+            .where((String token) => token.isNotEmpty)
+            .toList();
+
+        if (rules.isEmpty) {
+          issues.add(ConfigValidationIssue(
+            lineNumber: lineNumber,
+            message: 'Поле crosslink не содержит корректных правил',
+          ));
+          continue;
+        }
+
+        for (final String rule in rules) {
+          final List<String> ruleErrors = _validateSingleCrossLinkRule(
+            rule,
+            availableSlots: availableSlots,
+          );
+          for (final String error in ruleErrors) {
+            issues.add(ConfigValidationIssue(
+              lineNumber: lineNumber,
+              message: error,
+            ));
           }
         }
       }
