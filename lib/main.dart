@@ -1655,6 +1655,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return true;
   }
 
+  bool _isEnumOptionValueAllowed(String value, Set<String> allowedValues) {
+    if (allowedValues.isEmpty) {
+      return true;
+    }
+    return allowedValues.contains(value);
+  }
+
   bool _isExplicitEmptyValue(String value) {
     return value.trim().toLowerCase() == 'empty';
   }
@@ -3247,6 +3254,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (_manifestData.containsKey('modes') && _manifestData['modes'] is List) {
       final Map<String, String> slotsFieldByMode = <String, String>{};
       final Map<String, Map<String, String>> optionTypesByMode = <String, Map<String, String>>{};
+      final Map<String, Map<String, Set<String>>> enumValuesByMode = <String, Map<String, Set<String>>>{};
       final List<dynamic> modesArray = _manifestData['modes'] as List<dynamic>;
       for (final dynamic modeItem in modesArray) {
         if (modeItem is Map<String, dynamic>) {
@@ -3255,17 +3263,27 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           if (modeName != null && modeName.isNotEmpty) {
             slotsFieldByMode[modeName] = slotsField ?? '';
             final Map<String, String> optionTypes = <String, String>{};
+            final Map<String, Set<String>> enumValues = <String, Set<String>>{};
             if (modeItem['options'] is List) {
               for (final dynamic optionItem in modeItem['options'] as List<dynamic>) {
                 if (optionItem is Map<String, dynamic>) {
                   final String? optionName = optionItem['name']?.toString();
                   if (optionName != null && optionName.isNotEmpty) {
-                    optionTypes[optionName] = optionItem['valueType']?.toString() ?? 'string';
+                    final String valueType = optionItem['valueType']?.toString() ?? 'string';
+                    optionTypes[optionName] = valueType;
+                    if (valueType.toLowerCase() == 'enum' && optionItem['values'] is List) {
+                      final Set<String> allowedValues = (optionItem['values'] as List<dynamic>)
+                          .map((dynamic enumValue) => enumValue.toString().trim())
+                          .where((String enumValue) => enumValue.isNotEmpty && enumValue.toLowerCase() != 'null')
+                          .toSet();
+                      enumValues[optionName] = allowedValues;
+                    }
                   }
                 }
               }
             }
             optionTypesByMode[modeName] = optionTypes;
+            enumValuesByMode[modeName] = enumValues;
           }
         }
       }
@@ -3312,6 +3330,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
         final String modeValue = modeInfo.modeValue;
         final Map<String, String>? allowedOptions = optionTypesByMode[modeValue];
+        final Map<String, Set<String>> allowedEnumValues = enumValuesByMode[modeValue] ?? <String, Set<String>>{};
         if (allowedOptions == null) {
           continue;
         }
@@ -3372,6 +3391,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               lineNumber: lineNumber,
               message: 'Значение "$optionRawValue" не соответствует типу "$valueType" для "$optionName"',
             ));
+            continue;
+          }
+
+          if (valueType.toLowerCase() == 'enum') {
+            final Set<String> allowedValues = allowedEnumValues[optionName] ?? <String>{};
+            if (!_isEnumOptionValueAllowed(optionRawValue, allowedValues)) {
+              issues.add(ConfigValidationIssue(
+                lineNumber: lineNumber,
+                message: 'Значение "$optionRawValue" недопустимо для "$optionName". Допустимые: ${allowedValues.join(', ')}',
+              ));
+            }
           }
         }
       }
