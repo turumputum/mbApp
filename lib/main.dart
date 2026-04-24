@@ -4798,6 +4798,19 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       optionSuggestions.add('$name:yes');
                       optionSuggestions.add('$name:no');
                       _log('DEBUG: Added flag option: $name:yes and $name:no');
+                    } else if (valueType == 'enum') {
+                      // Enum type: suggest all explicit values from manifest "values" list
+                      if (option['values'] is List) {
+                        final List<dynamic> enumValues = option['values'] as List<dynamic>;
+                        for (final dynamic enumValue in enumValues) {
+                          final String valueStr = enumValue.toString().trim();
+                          if (valueStr.isNotEmpty && valueStr.toLowerCase() != 'null') {
+                            final String enumOption = '$name:$valueStr';
+                            optionSuggestions.add(enumOption);
+                            _log('DEBUG: Added enum option: $enumOption');
+                          }
+                        }
+                      }
                     } else {
                       // For other types, use valueDefault
                       final String? valueDefault = option['valueDefault']?.toString();
