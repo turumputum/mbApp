@@ -13,6 +13,20 @@ import 'package:ftpconnect/ftpconnect.dart';
 import 'package:flutter/services.dart';
 import 'package:multicast_dns/multicast_dns.dart';
 
+typedef _IpInterfaceChangeCallbackNative = ffi.Void Function(
+  ffi.Pointer<ffi.Void>,
+  ffi.Pointer<ffi.Void>,
+  ffi.Uint32,
+);
+typedef _NotifyIpInterfaceChangeNative = ffi.Uint32 Function(
+  ffi.Int32,
+  ffi.Pointer<ffi.NativeFunction<_IpInterfaceChangeCallbackNative>>,
+  ffi.Pointer<ffi.Void>,
+  ffi.Uint8,
+  ffi.Pointer<ffi.IntPtr>,
+);
+typedef _CancelMibChangeNotify2Native = ffi.Uint32 Function(ffi.Pointer<ffi.Void>);
+
 /// Cross link step types for step-by-step construction
 enum CrossLinkStepType {
   sourceSlot,
@@ -717,8 +731,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   // mDNS socket (long-lived, opened at startup, closed at exit)
   RawDatagramSocket? _mdnsSocket;
   StreamSubscription<RawSocketEvent>? _mdnsSocketSubscription;
-  Timer? _windowsNetworkChangeTimer;
-  String _windowsNetworkSignature = '';
+  ffi.DynamicLibrary? _ipHlpApi;
+  ffi.NativeCallable<_IpInterfaceChangeCallbackNative>? _ipInterfaceChangeCallback;
+  ffi.Pointer<ffi.Void> _ipInterfaceChangeHandle = ffi.nullptr;
+  Timer? _windowsNetworkReopenDebounceTimer;
   bool _isReinitializingMdnsSocket = false;
   int _mdnsPacketCount = 0;
   final Set<String> _mdnsDiscoveredDevices = <String>{}; // Track discovered device IDs
@@ -986,58 +1002,66 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   void _startWindowsNetworkChangeWatcher() {
     if (!Platform.isWindows) return;
-    _windowsNetworkChangeTimer?.cancel();
-    unawaited(_refreshWindowsNetworkSignature());
-    _windowsNetworkChangeTimer = Timer.periodic(const Duration(seconds: 2), (Timer timer) {
-      if (!mounted) {
-        timer.cancel();
+    try {
+      _ipHlpApi ??= ffi.DynamicLibrary.open('iphlpapi.dll');
+      final notifyIpInterfaceChange = _ipHlpApi!.lookupFunction<
+          _NotifyIpInterfaceChangeNative,
+          int Function(
+            int,
+            ffi.Pointer<ffi.NativeFunction<_IpInterfaceChangeCallbackNative>>,
+            ffi.Pointer<ffi.Void>,
+            int,
+            ffi.Pointer<ffi.IntPtr>,
+          )>('NotifyIpInterfaceChange');
+
+      if (_ipInterfaceChangeHandle != ffi.nullptr) {
         return;
       }
-      unawaited(_checkWindowsNetworkChange());
-    });
-  }
 
-  Future<void> _refreshWindowsNetworkSignature() async {
-    _windowsNetworkSignature = await _buildWindowsNetworkSignature();
-  }
-
-  Future<void> _checkWindowsNetworkChange() async {
-    if (!Platform.isWindows || _isReinitializingMdnsSocket) return;
-    final String newSignature = await _buildWindowsNetworkSignature();
-    if (newSignature.isEmpty) return;
-    if (_windowsNetworkSignature.isEmpty) {
-      _windowsNetworkSignature = newSignature;
-      return;
-    }
-    if (newSignature == _windowsNetworkSignature) return;
-
-    _windowsNetworkSignature = newSignature;
-    _log('mDNS: Network configuration changed on Windows, reopening socket...');
-    await _reinitializeMdnsSocketAfterNetworkChange();
-  }
-
-  Future<String> _buildWindowsNetworkSignature() async {
-    try {
-      final List<NetworkInterface> interfaces = await NetworkInterface.list(
-        includeLoopback: false,
-        includeLinkLocal: true,
+      _ipInterfaceChangeCallback ??=
+          ffi.NativeCallable<_IpInterfaceChangeCallbackNative>.listener(
+        _onWindowsIpInterfaceChange,
       );
-      final List<String> parts = <String>[];
-      for (final NetworkInterface networkInterface in interfaces) {
-        final List<String> addresses = networkInterface.addresses
-            .map((InternetAddress address) => address.address)
-            .where((String value) => value.isNotEmpty)
-            .toList(growable: false)
-          ..sort();
-        if (addresses.isEmpty) continue;
-        parts.add('${networkInterface.name}:${addresses.join(",")}');
+
+      final ffi.Pointer<ffi.IntPtr> notifyHandle = malloc.allocate<ffi.IntPtr>(1);
+      try {
+        const int afUnspec = 0;
+        const int noInitialNotification = 0;
+        final int result = notifyIpInterfaceChange(
+          afUnspec,
+          _ipInterfaceChangeCallback!.nativeFunction,
+          ffi.nullptr,
+          noInitialNotification,
+          notifyHandle,
+        );
+        if (result != 0) {
+          _log('mDNS: NotifyIpInterfaceChange registration failed, code: $result');
+          return;
+        }
+
+        _ipInterfaceChangeHandle = ffi.Pointer<ffi.Void>.fromAddress(notifyHandle.value);
+        _log('mDNS: NotifyIpInterfaceChange watcher started');
+      } finally {
+        malloc.free(notifyHandle);
       }
-      parts.sort();
-      return parts.join('|');
-    } catch (e) {
-      _log('mDNS: Failed to read Windows network interfaces: ${e.toString().split('\n').first}');
-      return '';
+    } catch (e, stackTrace) {
+      _log('mDNS: Failed to start NotifyIpInterfaceChange watcher: ${e.toString().split('\n').first}');
+      _log('mDNS: Watcher stack trace: ${stackTrace.toString().split('\n').take(3).join('\n')}');
     }
+  }
+
+  void _onWindowsIpInterfaceChange(
+    ffi.Pointer<ffi.Void> callerContext,
+    ffi.Pointer<ffi.Void> row,
+    int notificationType,
+  ) {
+    if (!mounted) return;
+    _windowsNetworkReopenDebounceTimer?.cancel();
+    _windowsNetworkReopenDebounceTimer = Timer(const Duration(milliseconds: 700), () {
+      if (!mounted) return;
+      _log('mDNS: Windows interface change event ($notificationType), reopening socket...');
+      unawaited(_reinitializeMdnsSocketAfterNetworkChange());
+    });
   }
 
   Future<void> _reinitializeMdnsSocketAfterNetworkChange() async {
@@ -1050,6 +1074,36 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _log('mDNS: Failed to reopen socket after network change: ${e.toString().split('\n').first}');
     } finally {
       _isReinitializingMdnsSocket = false;
+    }
+  }
+
+  void _stopWindowsNetworkChangeWatcher() {
+    _windowsNetworkReopenDebounceTimer?.cancel();
+    _windowsNetworkReopenDebounceTimer = null;
+    if (!Platform.isWindows) return;
+    if (_ipInterfaceChangeHandle == ffi.nullptr) {
+      _ipInterfaceChangeCallback?.close();
+      _ipInterfaceChangeCallback = null;
+      return;
+    }
+
+    try {
+      _ipHlpApi ??= ffi.DynamicLibrary.open('iphlpapi.dll');
+      final cancelMibChangeNotify2 = _ipHlpApi!.lookupFunction<
+          _CancelMibChangeNotify2Native,
+          int Function(ffi.Pointer<ffi.Void>)>('CancelMibChangeNotify2');
+      final int result = cancelMibChangeNotify2(_ipInterfaceChangeHandle);
+      if (result != 0) {
+        _log('mDNS: CancelMibChangeNotify2 failed, code: $result');
+      } else {
+        _log('mDNS: NotifyIpInterfaceChange watcher stopped');
+      }
+    } catch (e) {
+      _log('mDNS: Failed to stop NotifyIpInterfaceChange watcher: ${e.toString().split('\n').first}');
+    } finally {
+      _ipInterfaceChangeHandle = ffi.nullptr;
+      _ipInterfaceChangeCallback?.close();
+      _ipInterfaceChangeCallback = null;
     }
   }
 
@@ -5338,7 +5392,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _configControllers.clear();
     _detailsTabControllerSerial.dispose();
     _detailsTabControllerMdns.dispose();
-    _windowsNetworkChangeTimer?.cancel();
+    _stopWindowsNetworkChangeWatcher();
     unawaited(_closeMdnsSocket());
     super.dispose();
   }
