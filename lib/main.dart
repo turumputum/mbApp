@@ -717,6 +717,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   // mDNS socket (long-lived, opened at startup, closed at exit)
   RawDatagramSocket? _mdnsSocket;
   StreamSubscription<RawSocketEvent>? _mdnsSocketSubscription;
+  Timer? _windowsNetworkChangeTimer;
+  String _windowsNetworkSignature = '';
+  bool _isReinitializingMdnsSocket = false;
   int _mdnsPacketCount = 0;
   final Set<String> _mdnsDiscoveredDevices = <String>{}; // Track discovered device IDs
   final Map<String, int> _mdnsMissedScans = <String, int>{}; // Consecutive not-found counters
@@ -782,6 +785,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _startBackgroundScanning();
     _loadConsoleHistory();
     _initializeMdnsSocket();
+    _startWindowsNetworkChangeWatcher();
   }
   
   /// Initialize mDNS socket (long-lived, opened at startup)
@@ -793,6 +797,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
     
     try {
+      await _closeMdnsSocket(logCloseMessage: false);
       _log('mDNS: Initializing persistent socket on anyIPv4:5353 using WinAPI...');
       
       // Step 1: Bind to INADDR_ANY:5353
@@ -976,6 +981,85 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _log('mDNS: Failed to initialize socket: ${e.toString().split('\n').first}');
       _log('mDNS: Error stack trace: ${stackTrace.toString().split('\n').take(5).join('\n')}');
       _mdnsSocket = null;
+    }
+  }
+
+  void _startWindowsNetworkChangeWatcher() {
+    if (!Platform.isWindows) return;
+    _windowsNetworkChangeTimer?.cancel();
+    unawaited(_refreshWindowsNetworkSignature());
+    _windowsNetworkChangeTimer = Timer.periodic(const Duration(seconds: 2), (Timer timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      unawaited(_checkWindowsNetworkChange());
+    });
+  }
+
+  Future<void> _refreshWindowsNetworkSignature() async {
+    _windowsNetworkSignature = await _buildWindowsNetworkSignature();
+  }
+
+  Future<void> _checkWindowsNetworkChange() async {
+    if (!Platform.isWindows || _isReinitializingMdnsSocket) return;
+    final String newSignature = await _buildWindowsNetworkSignature();
+    if (newSignature.isEmpty) return;
+    if (_windowsNetworkSignature.isEmpty) {
+      _windowsNetworkSignature = newSignature;
+      return;
+    }
+    if (newSignature == _windowsNetworkSignature) return;
+
+    _windowsNetworkSignature = newSignature;
+    _log('mDNS: Network configuration changed on Windows, reopening socket...');
+    await _reinitializeMdnsSocketAfterNetworkChange();
+  }
+
+  Future<String> _buildWindowsNetworkSignature() async {
+    try {
+      final List<NetworkInterface> interfaces = await NetworkInterface.list(
+        includeLoopback: false,
+        includeLinkLocal: true,
+      );
+      final List<String> parts = <String>[];
+      for (final NetworkInterface networkInterface in interfaces) {
+        final List<String> addresses = networkInterface.addresses
+            .map((InternetAddress address) => address.address)
+            .where((String value) => value.isNotEmpty)
+            .toList(growable: false)
+          ..sort();
+        if (addresses.isEmpty) continue;
+        parts.add('${networkInterface.name}:${addresses.join(",")}');
+      }
+      parts.sort();
+      return parts.join('|');
+    } catch (e) {
+      _log('mDNS: Failed to read Windows network interfaces: ${e.toString().split('\n').first}');
+      return '';
+    }
+  }
+
+  Future<void> _reinitializeMdnsSocketAfterNetworkChange() async {
+    if (!Platform.isWindows || _isReinitializingMdnsSocket) return;
+    _isReinitializingMdnsSocket = true;
+    try {
+      await _initializeMdnsSocket();
+      _log('mDNS: Socket reopened after Windows network change');
+    } catch (e) {
+      _log('mDNS: Failed to reopen socket after network change: ${e.toString().split('\n').first}');
+    } finally {
+      _isReinitializingMdnsSocket = false;
+    }
+  }
+
+  Future<void> _closeMdnsSocket({bool logCloseMessage = true}) async {
+    await _mdnsSocketSubscription?.cancel();
+    _mdnsSocketSubscription = null;
+    _mdnsSocket?.close();
+    _mdnsSocket = null;
+    if (logCloseMessage) {
+      _log('mDNS: Persistent socket closed');
     }
   }
   
@@ -5254,11 +5338,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _configControllers.clear();
     _detailsTabControllerSerial.dispose();
     _detailsTabControllerMdns.dispose();
-    // Close mDNS socket
-    _mdnsSocketSubscription?.cancel();
-    _mdnsSocket?.close();
-    _mdnsSocket = null;
-    _log('mDNS: Persistent socket closed');
+    _windowsNetworkChangeTimer?.cancel();
+    unawaited(_closeMdnsSocket());
     super.dispose();
   }
 
