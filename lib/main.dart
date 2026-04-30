@@ -2575,7 +2575,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       
       // Get the local port of the socket to log it
       final int localPort = socket.port;
-      _log('mDNS: Sending query from local port $localPort to ${multicastAddress.address}:$mdnsPort');
+      final String outgoingInterfaceInfo = await _describeOutgoingInterface(socket);
+      _log('mDNS: Sending query from local port $localPort to ${multicastAddress.address}:$mdnsPort via $outgoingInterfaceInfo');
       _logDnsPacketDetails('TX(manual)', Uint8List.fromList(packet));
       
       final int bytesSent = socket.send(
@@ -2587,7 +2588,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       final String interfaceInfo = interfaceAddress != null 
           ? ' on interface ${interfaceAddress.address}' 
           : '';
-      _log('mDNS: Sent query for $serviceType$interfaceInfo, $bytesSent bytes sent from port $localPort to ${multicastAddress.address}:$mdnsPort');
+      _log('mDNS: Sent query for $serviceType$interfaceInfo, $bytesSent bytes sent from port $localPort to ${multicastAddress.address}:$mdnsPort via $outgoingInterfaceInfo');
       
       if (bytesSent == 0) {
         _log('mDNS: Warning - no bytes were sent$interfaceInfo, check socket configuration');
@@ -2636,6 +2637,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       // Send to mDNS multicast address
       final InternetAddress multicastAddress = InternetAddress('224.0.0.251');
       const int mdnsPort = 5353;
+      final String outgoingInterfaceInfo = await _describeOutgoingInterface(socket);
+      _log('mDNS: Sending query for $serviceType via $outgoingInterfaceInfo');
       _logDnsPacketDetails('TX(socket)', Uint8List.fromList(packet));
       
       final int bytesSent = socket.send(
@@ -2644,7 +2647,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         mdnsPort,
       );
       
-      _log('mDNS: Sent query for $serviceType from socket (port ${socket.port}), $bytesSent bytes to ${multicastAddress.address}:$mdnsPort');
+      _log('mDNS: Sent query for $serviceType from socket (port ${socket.port}), $bytesSent bytes to ${multicastAddress.address}:$mdnsPort via $outgoingInterfaceInfo');
       
       if (bytesSent == 0) {
         _log('mDNS: Warning - no bytes were sent from socket');
@@ -2655,6 +2658,45 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _log('mDNS: Failed to send query from socket: ${e.toString().split('\n').first}');
                   }
                 }
+
+  Future<String> _describeOutgoingInterface(RawDatagramSocket socket) async {
+    try {
+      final String localAddress = socket.address.address;
+      final List<NetworkInterface> interfaces = await NetworkInterface.list(
+        includeLoopback: false,
+        includeLinkLocal: true,
+        type: InternetAddressType.IPv4,
+      );
+
+      if (localAddress != '0.0.0.0' && localAddress != '::') {
+        for (final NetworkInterface networkInterface in interfaces) {
+          final bool matches = networkInterface.addresses.any(
+            (InternetAddress address) => address.address == localAddress,
+          );
+          if (matches) {
+            return '${networkInterface.name} ($localAddress)';
+          }
+        }
+        return 'unresolved interface ($localAddress)';
+      }
+
+      final List<String> candidates = <String>[];
+      for (final NetworkInterface networkInterface in interfaces) {
+        final List<String> addresses = networkInterface.addresses
+            .map((InternetAddress address) => address.address)
+            .where((String value) => value.isNotEmpty)
+            .toList(growable: false);
+        if (addresses.isEmpty) continue;
+        candidates.add('${networkInterface.name}[${addresses.join(",")}]');
+      }
+      if (candidates.isEmpty) {
+        return 'auto-route (no active non-loopback IPv4 interfaces found)';
+      }
+      return 'auto-route (socket bound ${socket.address.address}:${socket.port}; candidates: ${candidates.join("; ")})';
+    } catch (e) {
+      return 'auto-route (failed to resolve interface: ${e.toString().split('\n').first})';
+    }
+  }
 
   Future<void> _scanMdnsBroadcasts() async {
     try {
