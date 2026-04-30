@@ -13,27 +13,6 @@ import 'package:ftpconnect/ftpconnect.dart';
 import 'package:flutter/services.dart';
 import 'package:multicast_dns/multicast_dns.dart';
 
-typedef _IpInterfaceChangeCallbackNative = ffi.Void Function(
-  ffi.Pointer<ffi.Void>,
-  ffi.Pointer<ffi.Void>,
-  ffi.Uint32,
-);
-typedef _NotifyIpInterfaceChangeNative = ffi.Uint32 Function(
-  ffi.Int32,
-  ffi.Pointer<ffi.NativeFunction<_IpInterfaceChangeCallbackNative>>,
-  ffi.Pointer<ffi.Void>,
-  ffi.Uint8,
-  ffi.Pointer<ffi.IntPtr>,
-);
-typedef _NotifyUnicastIpAddressChangeNative = ffi.Uint32 Function(
-  ffi.Int32,
-  ffi.Pointer<ffi.NativeFunction<_IpInterfaceChangeCallbackNative>>,
-  ffi.Pointer<ffi.Void>,
-  ffi.Uint8,
-  ffi.Pointer<ffi.IntPtr>,
-);
-typedef _CancelMibChangeNotify2Native = ffi.Uint32 Function(ffi.Pointer<ffi.Void>);
-
 /// Cross link step types for step-by-step construction
 enum CrossLinkStepType {
   sourceSlot,
@@ -735,22 +714,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Map<String, String> _chapterDescriptions = {};
   Map<String, String> _chapterWildcards = {}; // Maps wildcard patterns to actual chapter names
   
-  // mDNS sockets on Windows: ANY + per-interface, long-lived until reinit/exit.
-  RawDatagramSocket? _mdnsSocket;
-  final List<RawDatagramSocket> _mdnsSockets = <RawDatagramSocket>[];
-  final List<StreamSubscription<RawSocketEvent>> _mdnsSocketSubscriptions = <StreamSubscription<RawSocketEvent>>[];
-  final Map<RawDatagramSocket, String> _mdnsSocketLabels = <RawDatagramSocket, String>{};
-  ffi.DynamicLibrary? _ipHlpApi;
-  ffi.NativeCallable<_IpInterfaceChangeCallbackNative>? _ipInterfaceChangeCallback;
-  ffi.Pointer<ffi.Void> _ipInterfaceChangeHandleV4 = ffi.nullptr;
-  ffi.Pointer<ffi.Void> _ipInterfaceChangeHandleV6 = ffi.nullptr;
-  ffi.Pointer<ffi.Void> _unicastIpAddressChangeHandle = ffi.nullptr;
-  Timer? _windowsNetworkReopenDebounceTimer;
-  Timer? _windowsNetworkFallbackTimer;
-  String _windowsNetworkSignature = '';
-  bool _hasPendingMdnsReinitialize = false;
-  DateTime? _lastMdnsReinitializeAt;
-  bool _isReinitializingMdnsSocket = false;
+  // mDNS on Windows: one ANY:5353 socket + one socket per active IPv4 interface.
+  // ANY is reopened only when the set of interface IPs changes; per-iface sockets
+  // are added/removed without touching unchanged interfaces.
+  RawDatagramSocket? _mdnsAnySocket;
+  StreamSubscription<RawSocketEvent>? _mdnsAnySubscription;
+  final Map<String, RawDatagramSocket> _mdnsIfaceSockets = <String, RawDatagramSocket>{};
+  final Map<String, StreamSubscription<RawSocketEvent>> _mdnsIfaceSubscriptions =
+      <String, StreamSubscription<RawSocketEvent>>{};
+  final Map<String, String> _mdnsIfaceLabels = <String, String>{};
+  Set<String> _mdnsLastActiveIpv4 = <String>{};
   int _mdnsPacketCount = 0;
   final Set<String> _mdnsDiscoveredDevices = <String>{}; // Track discovered device IDs
   final Map<String, int> _mdnsMissedScans = <String, int>{}; // Consecutive not-found counters
@@ -816,100 +789,176 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _startBackgroundScanning();
     _loadConsoleHistory();
     _initializeMdnsSocket();
-    _startWindowsNetworkChangeWatcher();
   }
-  
-  /// Initialize mDNS sockets (long-lived, opened at startup).
-  /// On Windows we open sockets on:
-  /// - anyIPv4:5353
-  /// - each active IPv4 interface address:5353
-  /// All sockets listen and all sockets transmit.
+
+  /// First-time mDNS socket setup on Windows (same as scan-time sync).
   Future<void> _initializeMdnsSocket() async {
-    if (!Platform.isWindows) {
-      // On non-Windows, we don't need a persistent socket
-      return;
+    if (!Platform.isWindows) return;
+    await _syncWindowsMdnsSocketsForScanSession();
+  }
+
+  bool _sameIpv4InterfaceSet(Set<String> a, Set<String> b) {
+    if (a.length != b.length) return false;
+    for (final String ip in a) {
+      if (!b.contains(ip)) return false;
     }
-    
+    return true;
+  }
+
+  List<RawDatagramSocket> _allWindowsMdnsSocketsForTx() {
+    final List<RawDatagramSocket> out = <RawDatagramSocket>[];
+    if (_mdnsAnySocket != null) {
+      out.add(_mdnsAnySocket!);
+    }
+    out.addAll(_mdnsIfaceSockets.values);
+    return out;
+  }
+
+  Future<void> _closeMdnsAnySocketOnly() async {
+    await _mdnsAnySubscription?.cancel();
+    _mdnsAnySubscription = null;
+    _mdnsAnySocket?.close();
+    _mdnsAnySocket = null;
+  }
+
+  Future<void> _closeMdnsIfaceSocket(String ip) async {
+    final StreamSubscription<RawSocketEvent>? sub = _mdnsIfaceSubscriptions.remove(ip);
+    await sub?.cancel();
+    final RawDatagramSocket? sock = _mdnsIfaceSockets.remove(ip);
+    _mdnsIfaceLabels.remove(ip);
+    sock?.close();
+  }
+
+  Future<void> _reopenMdnsAnySocket(InternetAddress multicastAddress, int mdnsPort) async {
+    await _closeMdnsAnySocketOnly();
     try {
-      await _closeMdnsSocket(logCloseMessage: false);
-      _log('mDNS: Initializing Windows socket set on port 5353 (ANY + per-interface)...');
-      const int mdnsPort = 5353;
-      final InternetAddress multicastAddress = InternetAddress('224.0.0.251');
+      final RawDatagramSocket socket = await RawDatagramSocket.bind(
+        InternetAddress.anyIPv4,
+        mdnsPort,
+        reuseAddress: true,
+        reusePort: false,
+      );
+      _mdnsAnySocket = socket;
+      try {
+        socket.joinMulticast(multicastAddress);
+        _log('mDNS: Joined multicast on ANY(0.0.0.0)');
+      } catch (e) {
+        _log('mDNS: Failed multicast join on ANY: ${e.toString().split('\n').first}');
+      }
+      try {
+        socket.broadcastEnabled = true;
+      } catch (_) {}
+      _mdnsAnySubscription = socket.listen(
+        (RawSocketEvent event) => _handleMdnsSocketEvent(socket, event),
+        onError: (Object error) {
+          _log('mDNS: Socket error on ANY(0.0.0.0): $error');
+        },
+        cancelOnError: false,
+      );
+      _log('mDNS: Socket ready on ANY(0.0.0.0):${socket.port}');
+    } catch (e) {
+      _log('mDNS: Failed to bind ANY socket on 0.0.0.0:5353: ${e.toString().split('\n').first}');
+    }
+  }
+
+  /// At each mDNS scan session: refresh interface list; reopen ANY only if IPv4 set changed;
+  /// open sockets for new IPs; close sockets for removed IPs.
+  Future<void> _syncWindowsMdnsSocketsForScanSession() async {
+    if (!Platform.isWindows) return;
+    const int mdnsPort = 5353;
+    final InternetAddress multicastAddress = InternetAddress('224.0.0.251');
+    try {
       final List<NetworkInterface> interfaces = await NetworkInterface.list(
         includeLoopback: false,
         includeLinkLocal: true,
         type: InternetAddressType.IPv4,
       );
-      final Map<String, NetworkInterface> interfaceByAddress = <String, NetworkInterface>{};
-      final List<InternetAddress> bindAddresses = <InternetAddress>[InternetAddress.anyIPv4];
-      final Set<String> seen = <String>{'0.0.0.0'};
+      final Map<String, NetworkInterface> interfaceByIp = <String, NetworkInterface>{};
+      final Set<String> currentIps = <String>{};
       for (final NetworkInterface networkInterface in interfaces) {
         for (final InternetAddress address in networkInterface.addresses) {
           final String ip = address.address;
           if (ip.isEmpty || ip == '0.0.0.0') continue;
-          if (!seen.add(ip)) continue;
-          bindAddresses.add(address);
-          interfaceByAddress[ip] = networkInterface;
+          if (address.isLoopback || address.isMulticast) continue;
+          if (!currentIps.add(ip)) continue;
+          interfaceByIp[ip] = networkInterface;
         }
       }
 
-      for (final InternetAddress bindAddress in bindAddresses) {
+      final bool compositionChanged = !_sameIpv4InterfaceSet(_mdnsLastActiveIpv4, currentIps);
+      if (compositionChanged) {
+        _log('mDNS: Active IPv4 interface set changed; reopening ANY(0.0.0.0):5353 only');
+        await _reopenMdnsAnySocket(multicastAddress, mdnsPort);
+      } else if (_mdnsAnySocket == null) {
+        await _reopenMdnsAnySocket(multicastAddress, mdnsPort);
+      }
+
+      for (final String ip in currentIps) {
+        if (_mdnsIfaceSockets.containsKey(ip)) continue;
         try {
+          final InternetAddress bindAddr = InternetAddress(ip);
           final RawDatagramSocket socket = await RawDatagramSocket.bind(
-            bindAddress,
+            bindAddr,
             mdnsPort,
             reuseAddress: true,
             reusePort: false,
           );
-          final String label = bindAddress == InternetAddress.anyIPv4
-              ? 'ANY(0.0.0.0)'
-              : '${interfaceByAddress[bindAddress.address]?.name ?? "iface"} (${bindAddress.address})';
-          _mdnsSockets.add(socket);
-          _mdnsSocketLabels[socket] = label;
-
+          final NetworkInterface? ni = interfaceByIp[ip];
+          final String label = '${ni?.name ?? 'iface'} ($ip)';
+          _mdnsIfaceSockets[ip] = socket;
+          _mdnsIfaceLabels[ip] = label;
           try {
-            socket.joinMulticast(multicastAddress, interfaceByAddress[bindAddress.address]);
+            socket.joinMulticast(multicastAddress, ni);
             _log('mDNS: Joined multicast on $label');
           } catch (e) {
             _log('mDNS: Failed multicast join on $label: ${e.toString().split('\n').first}');
           }
-
           try {
             socket.broadcastEnabled = true;
           } catch (_) {}
-
-          final StreamSubscription<RawSocketEvent> subscription = socket.listen(
+          _mdnsIfaceSubscriptions[ip] = socket.listen(
             (RawSocketEvent event) => _handleMdnsSocketEvent(socket, event),
             onError: (Object error) {
               _log('mDNS: Socket error on $label: $error');
             },
             cancelOnError: false,
           );
-          _mdnsSocketSubscriptions.add(subscription);
           _log('mDNS: Socket ready on $label:${socket.port}');
         } catch (e) {
-          _log('mDNS: Failed to bind socket on ${bindAddress.address}:5353: ${e.toString().split('\n').first}');
+          _log('mDNS: Failed to bind socket on $ip:5353: ${e.toString().split('\n').first}');
         }
       }
 
-      _mdnsSocket = _mdnsSockets.isNotEmpty ? _mdnsSockets.first : null;
-      if (_mdnsSockets.isEmpty) {
-        _log('mDNS: Failed to initialize Windows socket set (no sockets bound)');
-      } else {
-        _mdnsPacketCount = 0;
-        _log('mDNS: Windows socket set ready (${_mdnsSockets.length} socket(s))');
+      final List<String> toRemove = _mdnsIfaceSockets.keys.where((String k) => !currentIps.contains(k)).toList();
+      for (final String ip in toRemove) {
+        await _closeMdnsIfaceSocket(ip);
+        _log('mDNS: Closed mDNS socket for removed interface $ip');
+      }
+
+      _mdnsLastActiveIpv4 = Set<String>.from(currentIps);
+      if (_mdnsAnySocket == null && _mdnsIfaceSockets.isEmpty) {
+        _log('mDNS: No Windows mDNS sockets bound after sync');
       }
     } catch (e, stackTrace) {
-      _log('mDNS: Failed to initialize socket: ${e.toString().split('\n').first}');
-      _log('mDNS: Error stack trace: ${stackTrace.toString().split('\n').take(5).join('\n')}');
-      _mdnsSocket = null;
+      _log('mDNS: Failed to sync Windows mDNS sockets: ${e.toString().split('\n').first}');
+      _log('mDNS: Stack trace: ${stackTrace.toString().split('\n').take(3).join('\n')}');
     }
   }
 
   void _handleMdnsSocketEvent(RawDatagramSocket socket, RawSocketEvent event) {
     if (event != RawSocketEvent.read) return;
-    if (!_mdnsSockets.contains(socket)) return;
-    final String socketLabel = _mdnsSocketLabels[socket] ?? socket.address.address;
+    final bool known = identical(socket, _mdnsAnySocket) ||
+        _mdnsIfaceSockets.values.any((RawDatagramSocket s) => identical(s, socket));
+    if (!known) return;
+    String socketLabel = 'ANY(0.0.0.0)';
+    if (!identical(socket, _mdnsAnySocket)) {
+      for (final MapEntry<String, RawDatagramSocket> e in _mdnsIfaceSockets.entries) {
+        if (identical(e.value, socket)) {
+          socketLabel = _mdnsIfaceLabels[e.key] ?? e.key;
+          break;
+        }
+      }
+    }
     try {
       final Datagram? datagram = socket.receive();
       if (datagram == null || datagram.data.isEmpty) return;
@@ -928,262 +977,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
-  void _startWindowsNetworkChangeWatcher() {
-    if (!Platform.isWindows) return;
-    try {
-      _startWindowsNetworkFallbackWatcher();
-      _ipHlpApi ??= ffi.DynamicLibrary.open('iphlpapi.dll');
-      final notifyIpInterfaceChange = _ipHlpApi!.lookupFunction<
-          _NotifyIpInterfaceChangeNative,
-          int Function(
-            int,
-            ffi.Pointer<ffi.NativeFunction<_IpInterfaceChangeCallbackNative>>,
-            ffi.Pointer<ffi.Void>,
-            int,
-            ffi.Pointer<ffi.IntPtr>,
-          )>('NotifyIpInterfaceChange');
-      final notifyUnicastIpAddressChange = _ipHlpApi!.lookupFunction<
-          _NotifyUnicastIpAddressChangeNative,
-          int Function(
-            int,
-            ffi.Pointer<ffi.NativeFunction<_IpInterfaceChangeCallbackNative>>,
-            ffi.Pointer<ffi.Void>,
-            int,
-            ffi.Pointer<ffi.IntPtr>,
-          )>('NotifyUnicastIpAddressChange');
-
-      final bool alreadyStarted = _ipInterfaceChangeHandleV4 != ffi.nullptr ||
-          _ipInterfaceChangeHandleV6 != ffi.nullptr ||
-          _unicastIpAddressChangeHandle != ffi.nullptr;
-      if (alreadyStarted) {
-        return;
-      }
-
-      _ipInterfaceChangeCallback ??=
-          ffi.NativeCallable<_IpInterfaceChangeCallbackNative>.listener(
-        _onWindowsIpInterfaceChange,
-      );
-
-      final ffi.Pointer<ffi.IntPtr> notifyHandle = malloc.allocate<ffi.IntPtr>(1);
-      try {
-        // Register IPv4 + IPv6 + unicast address changes for maximum coverage
-        // of adapter reconfiguration events (Wi-Fi/VPN up/down).
-        const int afInet = 2;
-        const int afInet6 = 23;
-        const int initialNotification = 1;
-
-        final int resultV4 = notifyIpInterfaceChange(
-          afInet,
-          _ipInterfaceChangeCallback!.nativeFunction,
-          ffi.nullptr,
-          initialNotification,
-          notifyHandle,
-        );
-        if (resultV4 != 0) {
-          _log('@@@@@@@@@@ mDNS: NotifyIpInterfaceChange(AF_INET) registration failed, code: $resultV4');
-          return;
-        }
-        _ipInterfaceChangeHandleV4 = ffi.Pointer<ffi.Void>.fromAddress(notifyHandle.value);
-        _log('@@@@@@@@@@ mDNS: NotifyIpInterfaceChange watcher started (AF_INET)');
-
-        final int resultV6 = notifyIpInterfaceChange(
-          afInet6,
-          _ipInterfaceChangeCallback!.nativeFunction,
-          ffi.nullptr,
-          initialNotification,
-          notifyHandle,
-        );
-        if (resultV6 != 0) {
-          _log('@@@@@@@@@@ mDNS: NotifyIpInterfaceChange(AF_INET6) registration failed, code: $resultV6');
-        } else {
-          _ipInterfaceChangeHandleV6 = ffi.Pointer<ffi.Void>.fromAddress(notifyHandle.value);
-          _log('@@@@@@@@@@ mDNS: NotifyIpInterfaceChange watcher started (AF_INET6)');
-        }
-
-        final int resultUnicast = notifyUnicastIpAddressChange(
-          afInet,
-          _ipInterfaceChangeCallback!.nativeFunction,
-          ffi.nullptr,
-          initialNotification,
-          notifyHandle,
-        );
-        if (resultUnicast != 0) {
-          _log('@@@@@@@@@@ mDNS: NotifyUnicastIpAddressChange registration failed, code: $resultUnicast');
-        } else {
-          _unicastIpAddressChangeHandle = ffi.Pointer<ffi.Void>.fromAddress(notifyHandle.value);
-          _log('@@@@@@@@@@ mDNS: NotifyUnicastIpAddressChange watcher started');
-        }
-      } finally {
-        malloc.free(notifyHandle);
-      }
-    } catch (e, stackTrace) {
-      _log('@@@@@@@@@@ mDNS: Failed to start NotifyIpInterfaceChange watcher: ${e.toString().split('\n').first}');
-      _log('@@@@@@@@@@ mDNS: Watcher stack trace: ${stackTrace.toString().split('\n').take(3).join('\n')}');
-    }
-  }
-
-  void _onWindowsIpInterfaceChange(
-    ffi.Pointer<ffi.Void> callerContext,
-    ffi.Pointer<ffi.Void> row,
-    int notificationType,
-  ) {
-    if (!mounted) return;
-    _windowsNetworkReopenDebounceTimer?.cancel();
-    _windowsNetworkReopenDebounceTimer = Timer(const Duration(milliseconds: 700), () {
-      if (!mounted) return;
-      _log('@@@@@@@@@@ mDNS: Windows interface change event ($notificationType), reopening socket...');
-      _scheduleMdnsSocketReinitialize();
-    });
-  }
-
-  void _scheduleMdnsSocketReinitialize() {
-    if (!mounted || !Platform.isWindows) return;
-    _hasPendingMdnsReinitialize = true;
-    if (_isScanning) {
-      _log('@@@@@@@@@@ mDNS: Reopen deferred until current scan completes');
-      return;
-    }
-    unawaited(_reinitializeMdnsSocketAfterNetworkChange());
-  }
-
-  void _startWindowsNetworkFallbackWatcher() {
-    _windowsNetworkFallbackTimer?.cancel();
-    unawaited(() async {
-      _windowsNetworkSignature = await _buildWindowsNetworkSignature();
-    }());
-    _windowsNetworkFallbackTimer = Timer.periodic(const Duration(seconds: 3), (Timer timer) {
-      if (!mounted || !Platform.isWindows) {
-        timer.cancel();
-        return;
-      }
-      unawaited(() async {
-        final String currentSignature = await _buildWindowsNetworkSignature();
-        if (currentSignature.isEmpty) return;
-        if (_windowsNetworkSignature.isEmpty) {
-          _windowsNetworkSignature = currentSignature;
-          return;
-        }
-        if (currentSignature == _windowsNetworkSignature) return;
-        _windowsNetworkSignature = currentSignature;
-        _log('@@@@@@@@@@ mDNS: Fallback network-change detector triggered reopen');
-        _scheduleMdnsSocketReinitialize();
-      }());
-    });
-  }
-
-  Future<String> _buildWindowsNetworkSignature() async {
-    try {
-      final List<NetworkInterface> interfaces = await NetworkInterface.list(
-        includeLoopback: false,
-        includeLinkLocal: true,
-        type: InternetAddressType.IPv4,
-      );
-      final List<String> parts = <String>[];
-      for (final NetworkInterface networkInterface in interfaces) {
-        final List<String> addresses = networkInterface.addresses
-            .map((InternetAddress address) => address.address)
-            .where((String ip) => ip.isNotEmpty)
-            .toList(growable: false)
-          ..sort();
-        if (addresses.isEmpty) continue;
-        parts.add('${networkInterface.name}:${addresses.join(",")}');
-      }
-      parts.sort();
-      return parts.join('|');
-    } catch (e) {
-      _log('@@@@@@@@@@ mDNS: Failed to build network signature: ${e.toString().split('\n').first}');
-      return '';
-    }
-  }
-
-  Future<void> _reinitializeMdnsSocketAfterNetworkChange() async {
-    if (!Platform.isWindows || _isReinitializingMdnsSocket) return;
-    final DateTime now = DateTime.now();
-    if (_lastMdnsReinitializeAt != null &&
-        now.difference(_lastMdnsReinitializeAt!).inMilliseconds < 1200) {
-      return;
-    }
-    if (!_hasPendingMdnsReinitialize) return;
-    _isReinitializingMdnsSocket = true;
-    try {
-      _hasPendingMdnsReinitialize = false;
-      await _initializeMdnsSocket();
-      _lastMdnsReinitializeAt = DateTime.now();
-      _log('@@@@@@@@@@ mDNS: Socket reopened after Windows network change');
-    } catch (e) {
-      _log('@@@@@@@@@@ mDNS: Failed to reopen socket after network change: ${e.toString().split('\n').first}');
-      _hasPendingMdnsReinitialize = true;
-    } finally {
-      _isReinitializingMdnsSocket = false;
-      if (_hasPendingMdnsReinitialize && mounted && !_isScanning) {
-        unawaited(_reinitializeMdnsSocketAfterNetworkChange());
-      }
-    }
-  }
-
-  void _stopWindowsNetworkChangeWatcher() {
-    _windowsNetworkReopenDebounceTimer?.cancel();
-    _windowsNetworkReopenDebounceTimer = null;
-    _windowsNetworkFallbackTimer?.cancel();
-    _windowsNetworkFallbackTimer = null;
-    if (!Platform.isWindows) return;
-    final bool hasAnyHandle = _ipInterfaceChangeHandleV4 != ffi.nullptr ||
-        _ipInterfaceChangeHandleV6 != ffi.nullptr ||
-        _unicastIpAddressChangeHandle != ffi.nullptr;
-    if (!hasAnyHandle) {
-      _ipInterfaceChangeCallback?.close();
-      _ipInterfaceChangeCallback = null;
-      return;
-    }
-
-    try {
-      _ipHlpApi ??= ffi.DynamicLibrary.open('iphlpapi.dll');
-      final cancelMibChangeNotify2 = _ipHlpApi!.lookupFunction<
-          _CancelMibChangeNotify2Native,
-          int Function(ffi.Pointer<ffi.Void>)>('CancelMibChangeNotify2');
-      if (_ipInterfaceChangeHandleV4 != ffi.nullptr) {
-        final int result = cancelMibChangeNotify2(_ipInterfaceChangeHandleV4);
-        if (result != 0) {
-          _log('@@@@@@@@@@ mDNS: CancelMibChangeNotify2(AF_INET) failed, code: $result');
-        }
-      }
-      if (_ipInterfaceChangeHandleV6 != ffi.nullptr) {
-        final int result = cancelMibChangeNotify2(_ipInterfaceChangeHandleV6);
-        if (result != 0) {
-          _log('@@@@@@@@@@ mDNS: CancelMibChangeNotify2(AF_INET6) failed, code: $result');
-        }
-      }
-      if (_unicastIpAddressChangeHandle != ffi.nullptr) {
-        final int result = cancelMibChangeNotify2(_unicastIpAddressChangeHandle);
-        if (result != 0) {
-          _log('@@@@@@@@@@ mDNS: CancelMibChangeNotify2(unicast) failed, code: $result');
-        }
-      }
-      _log('@@@@@@@@@@ mDNS: Windows network change watchers stopped');
-    } catch (e) {
-      _log('@@@@@@@@@@ mDNS: Failed to stop NotifyIpInterfaceChange watcher: ${e.toString().split('\n').first}');
-    } finally {
-      _ipInterfaceChangeHandleV4 = ffi.nullptr;
-      _ipInterfaceChangeHandleV6 = ffi.nullptr;
-      _unicastIpAddressChangeHandle = ffi.nullptr;
-      _ipInterfaceChangeCallback?.close();
-      _ipInterfaceChangeCallback = null;
-    }
-  }
-
   Future<void> _closeMdnsSocket({bool logCloseMessage = true}) async {
-    for (final StreamSubscription<RawSocketEvent> subscription in _mdnsSocketSubscriptions) {
-      await subscription.cancel();
+    await _closeMdnsAnySocketOnly();
+    final List<String> ifaceKeys = List<String>.from(_mdnsIfaceSockets.keys);
+    for (final String ip in ifaceKeys) {
+      await _closeMdnsIfaceSocket(ip);
     }
-    _mdnsSocketSubscriptions.clear();
-    for (final RawDatagramSocket socket in _mdnsSockets) {
-      socket.close();
-    }
-    _mdnsSockets.clear();
-    _mdnsSocketLabels.clear();
-    _mdnsSocket = null;
+    _mdnsLastActiveIpv4.clear();
     if (logCloseMessage) {
-      _log('mDNS: Windows socket set closed');
+      _log('mDNS: Windows mDNS sockets closed');
     }
   }
   
@@ -2324,10 +2126,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           _isScanning = false;
         });
       }
-      if (_hasPendingMdnsReinitialize && !_isReinitializingMdnsSocket) {
-        _log('@@@@@@@@@@ mDNS: Running deferred reopen after scan completion');
-        unawaited(_reinitializeMdnsSocketAfterNetworkChange());
-      }
     }
   }
 
@@ -2555,7 +2353,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   /// ANY + each interface-bound socket.
   Future<void> _sendMdnsQueryFromSocket(RawDatagramSocket socket, String serviceType) async {
     try {
-      final List<RawDatagramSocket> socketSnapshot = List<RawDatagramSocket>.from(_mdnsSockets);
+      final List<RawDatagramSocket> socketSnapshot = List<RawDatagramSocket>.from(_allWindowsMdnsSocketsForTx());
       if (socketSnapshot.isEmpty) {
         _log('mDNS: No Windows mDNS sockets available for TX');
         return;
@@ -2625,12 +2423,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       final List<String> serviceTypes = ['_ftp._tcp'];
       
       if (Platform.isWindows) {
-        // Use persistent socket set (ANY + per-interface, opened at startup)
-        if (_mdnsSockets.isEmpty) {
-          _log('mDNS: Socket set not initialized yet, waiting...');
-          // Wait a bit for socket initialization
+        await _syncWindowsMdnsSocketsForScanSession();
+        if (_allWindowsMdnsSocketsForTx().isEmpty) {
+          _log('mDNS: No sockets after interface sync, waiting...');
           await Future<void>.delayed(const Duration(milliseconds: 500));
-          if (_mdnsSockets.isEmpty) {
+          await _syncWindowsMdnsSocketsForScanSession();
+          if (_allWindowsMdnsSocketsForTx().isEmpty) {
             _log('mDNS: Socket set still not available, skipping scan');
             return;
           }
@@ -2641,12 +2439,20 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           _log('mDNS: Discovering $serviceType services...');
           
           // Send from each socket in the persistent socket set.
-          await _sendMdnsQueryFromSocket(_mdnsSocket ?? _mdnsSockets.first, serviceType);
+          await _sendMdnsQueryFromSocket(_allWindowsMdnsSocketsForTx().first, serviceType);
           
           // Wait for responses
-          final List<RawDatagramSocket> socketSnapshot = List<RawDatagramSocket>.from(_mdnsSockets);
+          final List<RawDatagramSocket> socketSnapshot = List<RawDatagramSocket>.from(_allWindowsMdnsSocketsForTx());
           final String portList = socketSnapshot
-              .map((RawDatagramSocket s) => '${_mdnsSocketLabels[s] ?? s.address.address}:${s.port}')
+              .map((RawDatagramSocket s) {
+                if (identical(s, _mdnsAnySocket)) return 'ANY(0.0.0.0):${s.port}';
+                for (final MapEntry<String, RawDatagramSocket> e in _mdnsIfaceSockets.entries) {
+                  if (identical(e.value, s)) {
+                    return '${_mdnsIfaceLabels[e.key] ?? e.key}:${s.port}';
+                  }
+                }
+                return '${s.address.address}:${s.port}';
+              })
               .join(', ');
           _log('mDNS: Waiting for responses on socket set: $portList');
           await Future<void>.delayed(const Duration(seconds: 8));
@@ -5425,7 +5231,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _configControllers.clear();
     _detailsTabControllerSerial.dispose();
     _detailsTabControllerMdns.dispose();
-    _stopWindowsNetworkChangeWatcher();
     unawaited(_closeMdnsSocket());
     super.dispose();
   }
