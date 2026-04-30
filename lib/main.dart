@@ -25,6 +25,13 @@ typedef _NotifyIpInterfaceChangeNative = ffi.Uint32 Function(
   ffi.Uint8,
   ffi.Pointer<ffi.IntPtr>,
 );
+typedef _NotifyUnicastIpAddressChangeNative = ffi.Uint32 Function(
+  ffi.Int32,
+  ffi.Pointer<ffi.NativeFunction<_IpInterfaceChangeCallbackNative>>,
+  ffi.Pointer<ffi.Void>,
+  ffi.Uint8,
+  ffi.Pointer<ffi.IntPtr>,
+);
 typedef _CancelMibChangeNotify2Native = ffi.Uint32 Function(ffi.Pointer<ffi.Void>);
 
 /// Cross link step types for step-by-step construction
@@ -733,7 +740,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   StreamSubscription<RawSocketEvent>? _mdnsSocketSubscription;
   ffi.DynamicLibrary? _ipHlpApi;
   ffi.NativeCallable<_IpInterfaceChangeCallbackNative>? _ipInterfaceChangeCallback;
-  ffi.Pointer<ffi.Void> _ipInterfaceChangeHandle = ffi.nullptr;
+  ffi.Pointer<ffi.Void> _ipInterfaceChangeHandleV4 = ffi.nullptr;
+  ffi.Pointer<ffi.Void> _ipInterfaceChangeHandleV6 = ffi.nullptr;
+  ffi.Pointer<ffi.Void> _unicastIpAddressChangeHandle = ffi.nullptr;
   Timer? _windowsNetworkReopenDebounceTimer;
   bool _isReinitializingMdnsSocket = false;
   int _mdnsPacketCount = 0;
@@ -1013,8 +1022,20 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             int,
             ffi.Pointer<ffi.IntPtr>,
           )>('NotifyIpInterfaceChange');
+      final notifyUnicastIpAddressChange = _ipHlpApi!.lookupFunction<
+          _NotifyUnicastIpAddressChangeNative,
+          int Function(
+            int,
+            ffi.Pointer<ffi.NativeFunction<_IpInterfaceChangeCallbackNative>>,
+            ffi.Pointer<ffi.Void>,
+            int,
+            ffi.Pointer<ffi.IntPtr>,
+          )>('NotifyUnicastIpAddressChange');
 
-      if (_ipInterfaceChangeHandle != ffi.nullptr) {
+      final bool alreadyStarted = _ipInterfaceChangeHandleV4 != ffi.nullptr ||
+          _ipInterfaceChangeHandleV6 != ffi.nullptr ||
+          _unicastIpAddressChangeHandle != ffi.nullptr;
+      if (alreadyStarted) {
         return;
       }
 
@@ -1025,28 +1046,59 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
       final ffi.Pointer<ffi.IntPtr> notifyHandle = malloc.allocate<ffi.IntPtr>(1);
       try {
-        const int afUnspec = 0;
-        const int noInitialNotification = 0;
-        final int result = notifyIpInterfaceChange(
-          afUnspec,
+        // Register IPv4 + IPv6 + unicast address changes for maximum coverage
+        // of adapter reconfiguration events (Wi-Fi/VPN up/down).
+        const int afInet = 2;
+        const int afInet6 = 23;
+        const int initialNotification = 1;
+
+        final int resultV4 = notifyIpInterfaceChange(
+          afInet,
           _ipInterfaceChangeCallback!.nativeFunction,
           ffi.nullptr,
-          noInitialNotification,
+          initialNotification,
           notifyHandle,
         );
-        if (result != 0) {
-          _log('mDNS: NotifyIpInterfaceChange registration failed, code: $result');
+        if (resultV4 != 0) {
+          _log('@@@@@@@@@@ mDNS: NotifyIpInterfaceChange(AF_INET) registration failed, code: $resultV4');
           return;
         }
+        _ipInterfaceChangeHandleV4 = ffi.Pointer<ffi.Void>.fromAddress(notifyHandle.value);
+        _log('@@@@@@@@@@ mDNS: NotifyIpInterfaceChange watcher started (AF_INET)');
 
-        _ipInterfaceChangeHandle = ffi.Pointer<ffi.Void>.fromAddress(notifyHandle.value);
-        _log('mDNS: NotifyIpInterfaceChange watcher started');
+        final int resultV6 = notifyIpInterfaceChange(
+          afInet6,
+          _ipInterfaceChangeCallback!.nativeFunction,
+          ffi.nullptr,
+          initialNotification,
+          notifyHandle,
+        );
+        if (resultV6 != 0) {
+          _log('@@@@@@@@@@ mDNS: NotifyIpInterfaceChange(AF_INET6) registration failed, code: $resultV6');
+        } else {
+          _ipInterfaceChangeHandleV6 = ffi.Pointer<ffi.Void>.fromAddress(notifyHandle.value);
+          _log('@@@@@@@@@@ mDNS: NotifyIpInterfaceChange watcher started (AF_INET6)');
+        }
+
+        final int resultUnicast = notifyUnicastIpAddressChange(
+          afInet,
+          _ipInterfaceChangeCallback!.nativeFunction,
+          ffi.nullptr,
+          initialNotification,
+          notifyHandle,
+        );
+        if (resultUnicast != 0) {
+          _log('@@@@@@@@@@ mDNS: NotifyUnicastIpAddressChange registration failed, code: $resultUnicast');
+        } else {
+          _unicastIpAddressChangeHandle = ffi.Pointer<ffi.Void>.fromAddress(notifyHandle.value);
+          _log('@@@@@@@@@@ mDNS: NotifyUnicastIpAddressChange watcher started');
+        }
       } finally {
         malloc.free(notifyHandle);
       }
     } catch (e, stackTrace) {
-      _log('mDNS: Failed to start NotifyIpInterfaceChange watcher: ${e.toString().split('\n').first}');
-      _log('mDNS: Watcher stack trace: ${stackTrace.toString().split('\n').take(3).join('\n')}');
+      _log('@@@@@@@@@@ mDNS: Failed to start NotifyIpInterfaceChange watcher: ${e.toString().split('\n').first}');
+      _log('@@@@@@@@@@ mDNS: Watcher stack trace: ${stackTrace.toString().split('\n').take(3).join('\n')}');
     }
   }
 
@@ -1059,7 +1111,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _windowsNetworkReopenDebounceTimer?.cancel();
     _windowsNetworkReopenDebounceTimer = Timer(const Duration(milliseconds: 700), () {
       if (!mounted) return;
-      _log('mDNS: Windows interface change event ($notificationType), reopening socket...');
+      _log('@@@@@@@@@@ mDNS: Windows interface change event ($notificationType), reopening socket...');
       unawaited(_reinitializeMdnsSocketAfterNetworkChange());
     });
   }
@@ -1069,9 +1121,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _isReinitializingMdnsSocket = true;
     try {
       await _initializeMdnsSocket();
-      _log('mDNS: Socket reopened after Windows network change');
+      _log('@@@@@@@@@@ mDNS: Socket reopened after Windows network change');
     } catch (e) {
-      _log('mDNS: Failed to reopen socket after network change: ${e.toString().split('\n').first}');
+      _log('@@@@@@@@@@ mDNS: Failed to reopen socket after network change: ${e.toString().split('\n').first}');
     } finally {
       _isReinitializingMdnsSocket = false;
     }
@@ -1081,7 +1133,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _windowsNetworkReopenDebounceTimer?.cancel();
     _windowsNetworkReopenDebounceTimer = null;
     if (!Platform.isWindows) return;
-    if (_ipInterfaceChangeHandle == ffi.nullptr) {
+    final bool hasAnyHandle = _ipInterfaceChangeHandleV4 != ffi.nullptr ||
+        _ipInterfaceChangeHandleV6 != ffi.nullptr ||
+        _unicastIpAddressChangeHandle != ffi.nullptr;
+    if (!hasAnyHandle) {
       _ipInterfaceChangeCallback?.close();
       _ipInterfaceChangeCallback = null;
       return;
@@ -1092,16 +1147,31 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       final cancelMibChangeNotify2 = _ipHlpApi!.lookupFunction<
           _CancelMibChangeNotify2Native,
           int Function(ffi.Pointer<ffi.Void>)>('CancelMibChangeNotify2');
-      final int result = cancelMibChangeNotify2(_ipInterfaceChangeHandle);
-      if (result != 0) {
-        _log('mDNS: CancelMibChangeNotify2 failed, code: $result');
-      } else {
-        _log('mDNS: NotifyIpInterfaceChange watcher stopped');
+      if (_ipInterfaceChangeHandleV4 != ffi.nullptr) {
+        final int result = cancelMibChangeNotify2(_ipInterfaceChangeHandleV4);
+        if (result != 0) {
+          _log('@@@@@@@@@@ mDNS: CancelMibChangeNotify2(AF_INET) failed, code: $result');
+        }
       }
+      if (_ipInterfaceChangeHandleV6 != ffi.nullptr) {
+        final int result = cancelMibChangeNotify2(_ipInterfaceChangeHandleV6);
+        if (result != 0) {
+          _log('@@@@@@@@@@ mDNS: CancelMibChangeNotify2(AF_INET6) failed, code: $result');
+        }
+      }
+      if (_unicastIpAddressChangeHandle != ffi.nullptr) {
+        final int result = cancelMibChangeNotify2(_unicastIpAddressChangeHandle);
+        if (result != 0) {
+          _log('@@@@@@@@@@ mDNS: CancelMibChangeNotify2(unicast) failed, code: $result');
+        }
+      }
+      _log('@@@@@@@@@@ mDNS: Windows network change watchers stopped');
     } catch (e) {
-      _log('mDNS: Failed to stop NotifyIpInterfaceChange watcher: ${e.toString().split('\n').first}');
+      _log('@@@@@@@@@@ mDNS: Failed to stop NotifyIpInterfaceChange watcher: ${e.toString().split('\n').first}');
     } finally {
-      _ipInterfaceChangeHandle = ffi.nullptr;
+      _ipInterfaceChangeHandleV4 = ffi.nullptr;
+      _ipInterfaceChangeHandleV6 = ffi.nullptr;
+      _unicastIpAddressChangeHandle = ffi.nullptr;
       _ipInterfaceChangeCallback?.close();
       _ipInterfaceChangeCallback = null;
     }
