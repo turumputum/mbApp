@@ -2603,61 +2603,68 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
-  /// Send mDNS query from socket (mdns-sd approach for Windows)
-  /// On Windows, we use ONE socket on anyIPv4:5353 for ALL operations
+  /// Send mDNS query for Windows:
+  /// receive socket stays bound to anyIPv4:5353,
+  /// transmit uses separate temporary socket per interface.
   Future<void> _sendMdnsQueryFromSocket(RawDatagramSocket socket, String serviceType) async {
     try {
-      // Build DNS query packet
-      final List<int> packet = [];
-      
-      // DNS Header (12 bytes)
-      packet.addAll([0x00, 0x00]); // ID: 0 (mDNS uses 0)
-      packet.addAll([0x00, 0x00]); // Flags: Standard query (0x0000)
-      packet.addAll([0x00, 0x01]); // Questions: 1
-      packet.addAll([0x00, 0x00]); // Answer RRs: 0
-      packet.addAll([0x00, 0x00]); // Authority RRs: 0
-      packet.addAll([0x00, 0x00]); // Additional RRs: 0
-      
-      // Question section
-      final String fullName = '$serviceType.local';
-      final List<String> labels = fullName.split('.');
-      for (final String label in labels) {
-        if (label.isNotEmpty) {
-          packet.add(label.length);
-          packet.addAll(label.codeUnits);
-              }
+      final List<InternetAddress> sendAddresses = await _getWindowsMdnsSendAddresses();
+      if (sendAddresses.isEmpty) {
+        _log('mDNS: No usable IPv4 interfaces for explicit TX; fallback to receive socket');
+        await _sendMdnsQuery(socket, serviceType);
+        return;
       }
-      packet.add(0); // Null terminator
-      
-      // QTYPE: PTR (12)
-      packet.addAll([0x00, 0x0C]);
-      // QCLASS: IN (1) - multicast query (0x0001)
-      packet.addAll([0x00, 0x01]);
-      
-      // Send to mDNS multicast address
-      final InternetAddress multicastAddress = InternetAddress('224.0.0.251');
-      const int mdnsPort = 5353;
-      final String outgoingInterfaceInfo = await _describeOutgoingInterface(socket);
-      _log('mDNS: Sending query for $serviceType via $outgoingInterfaceInfo');
-      _logDnsPacketDetails('TX(socket)', Uint8List.fromList(packet));
-      
-      final int bytesSent = socket.send(
-        Uint8List.fromList(packet),
-        multicastAddress,
-        mdnsPort,
-      );
-      
-      _log('mDNS: Sent query for $serviceType from socket (port ${socket.port}), $bytesSent bytes to ${multicastAddress.address}:$mdnsPort via $outgoingInterfaceInfo');
-      
-      if (bytesSent == 0) {
-        _log('mDNS: Warning - no bytes were sent from socket');
-      } else if (bytesSent != packet.length) {
-        _log('mDNS: Warning - only $bytesSent of ${packet.length} bytes were sent from socket');
+
+      _log('mDNS: Explicit TX for $serviceType over ${sendAddresses.length} interface(s)');
+      for (final InternetAddress interfaceAddress in sendAddresses) {
+        RawDatagramSocket? txSocket;
+        try {
+          txSocket = await RawDatagramSocket.bind(
+            interfaceAddress,
+            0,
+            reuseAddress: false,
+            reusePort: false,
+          );
+          await _sendMdnsQuery(
+            txSocket,
+            serviceType,
+            interfaceAddress: interfaceAddress,
+          );
+        } catch (e) {
+          _log('mDNS: Failed TX socket on ${interfaceAddress.address}: ${e.toString().split('\n').first}');
+        } finally {
+          txSocket?.close();
+        }
       }
     } catch (e) {
       _log('mDNS: Failed to send query from socket: ${e.toString().split('\n').first}');
-                  }
-                }
+    }
+  }
+
+  Future<List<InternetAddress>> _getWindowsMdnsSendAddresses() async {
+    final List<InternetAddress> result = <InternetAddress>[];
+    final Set<String> seen = <String>{};
+    try {
+      final List<NetworkInterface> interfaces = await NetworkInterface.list(
+        includeLoopback: false,
+        includeLinkLocal: true,
+        type: InternetAddressType.IPv4,
+      );
+      for (final NetworkInterface networkInterface in interfaces) {
+        for (final InternetAddress address in networkInterface.addresses) {
+          final String ip = address.address;
+          if (ip.isEmpty || ip == '0.0.0.0') continue;
+          if (address.isLoopback || address.isMulticast) continue;
+          if (!seen.add(ip)) continue;
+          result.add(address);
+          _log('mDNS: TX candidate interface ${networkInterface.name} ($ip)');
+        }
+      }
+    } catch (e) {
+      _log('mDNS: Failed to enumerate TX interfaces: ${e.toString().split('\n').first}');
+    }
+    return result;
+  }
 
   Future<String> _describeOutgoingInterface(RawDatagramSocket socket) async {
     try {
