@@ -746,6 +746,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   ffi.Pointer<ffi.Void> _ipInterfaceChangeHandleV6 = ffi.nullptr;
   ffi.Pointer<ffi.Void> _unicastIpAddressChangeHandle = ffi.nullptr;
   Timer? _windowsNetworkReopenDebounceTimer;
+  Timer? _windowsNetworkFallbackTimer;
+  String _windowsNetworkSignature = '';
+  bool _hasPendingMdnsReinitialize = false;
+  DateTime? _lastMdnsReinitializeAt;
   bool _isReinitializingMdnsSocket = false;
   int _mdnsPacketCount = 0;
   final Set<String> _mdnsDiscoveredDevices = <String>{}; // Track discovered device IDs
@@ -927,6 +931,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   void _startWindowsNetworkChangeWatcher() {
     if (!Platform.isWindows) return;
     try {
+      _startWindowsNetworkFallbackWatcher();
       _ipHlpApi ??= ffi.DynamicLibrary.open('iphlpapi.dll');
       final notifyIpInterfaceChange = _ipHlpApi!.lookupFunction<
           _NotifyIpInterfaceChangeNative,
@@ -1027,26 +1032,100 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _windowsNetworkReopenDebounceTimer = Timer(const Duration(milliseconds: 700), () {
       if (!mounted) return;
       _log('@@@@@@@@@@ mDNS: Windows interface change event ($notificationType), reopening socket...');
-      unawaited(_reinitializeMdnsSocketAfterNetworkChange());
+      _scheduleMdnsSocketReinitialize();
     });
+  }
+
+  void _scheduleMdnsSocketReinitialize() {
+    if (!mounted || !Platform.isWindows) return;
+    _hasPendingMdnsReinitialize = true;
+    if (_isScanning) {
+      _log('@@@@@@@@@@ mDNS: Reopen deferred until current scan completes');
+      return;
+    }
+    unawaited(_reinitializeMdnsSocketAfterNetworkChange());
+  }
+
+  void _startWindowsNetworkFallbackWatcher() {
+    _windowsNetworkFallbackTimer?.cancel();
+    unawaited(() async {
+      _windowsNetworkSignature = await _buildWindowsNetworkSignature();
+    }());
+    _windowsNetworkFallbackTimer = Timer.periodic(const Duration(seconds: 3), (Timer timer) {
+      if (!mounted || !Platform.isWindows) {
+        timer.cancel();
+        return;
+      }
+      unawaited(() async {
+        final String currentSignature = await _buildWindowsNetworkSignature();
+        if (currentSignature.isEmpty) return;
+        if (_windowsNetworkSignature.isEmpty) {
+          _windowsNetworkSignature = currentSignature;
+          return;
+        }
+        if (currentSignature == _windowsNetworkSignature) return;
+        _windowsNetworkSignature = currentSignature;
+        _log('@@@@@@@@@@ mDNS: Fallback network-change detector triggered reopen');
+        _scheduleMdnsSocketReinitialize();
+      }());
+    });
+  }
+
+  Future<String> _buildWindowsNetworkSignature() async {
+    try {
+      final List<NetworkInterface> interfaces = await NetworkInterface.list(
+        includeLoopback: false,
+        includeLinkLocal: true,
+        type: InternetAddressType.IPv4,
+      );
+      final List<String> parts = <String>[];
+      for (final NetworkInterface networkInterface in interfaces) {
+        final List<String> addresses = networkInterface.addresses
+            .map((InternetAddress address) => address.address)
+            .where((String ip) => ip.isNotEmpty)
+            .toList(growable: false)
+          ..sort();
+        if (addresses.isEmpty) continue;
+        parts.add('${networkInterface.name}:${addresses.join(",")}');
+      }
+      parts.sort();
+      return parts.join('|');
+    } catch (e) {
+      _log('@@@@@@@@@@ mDNS: Failed to build network signature: ${e.toString().split('\n').first}');
+      return '';
+    }
   }
 
   Future<void> _reinitializeMdnsSocketAfterNetworkChange() async {
     if (!Platform.isWindows || _isReinitializingMdnsSocket) return;
+    final DateTime now = DateTime.now();
+    if (_lastMdnsReinitializeAt != null &&
+        now.difference(_lastMdnsReinitializeAt!).inMilliseconds < 1200) {
+      return;
+    }
+    if (!_hasPendingMdnsReinitialize) return;
     _isReinitializingMdnsSocket = true;
     try {
+      _hasPendingMdnsReinitialize = false;
       await _initializeMdnsSocket();
+      _lastMdnsReinitializeAt = DateTime.now();
       _log('@@@@@@@@@@ mDNS: Socket reopened after Windows network change');
     } catch (e) {
       _log('@@@@@@@@@@ mDNS: Failed to reopen socket after network change: ${e.toString().split('\n').first}');
+      _hasPendingMdnsReinitialize = true;
     } finally {
       _isReinitializingMdnsSocket = false;
+      if (_hasPendingMdnsReinitialize && mounted && !_isScanning) {
+        unawaited(_reinitializeMdnsSocketAfterNetworkChange());
+      }
     }
   }
 
   void _stopWindowsNetworkChangeWatcher() {
     _windowsNetworkReopenDebounceTimer?.cancel();
     _windowsNetworkReopenDebounceTimer = null;
+    _windowsNetworkFallbackTimer?.cancel();
+    _windowsNetworkFallbackTimer = null;
     if (!Platform.isWindows) return;
     final bool hasAnyHandle = _ipInterfaceChangeHandleV4 != ffi.nullptr ||
         _ipInterfaceChangeHandleV6 != ffi.nullptr ||
@@ -2245,6 +2324,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           _isScanning = false;
         });
       }
+      if (_hasPendingMdnsReinitialize && !_isReinitializingMdnsSocket) {
+        _log('@@@@@@@@@@ mDNS: Running deferred reopen after scan completion');
+        unawaited(_reinitializeMdnsSocketAfterNetworkChange());
+      }
     }
   }
 
@@ -2472,13 +2555,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   /// ANY + each interface-bound socket.
   Future<void> _sendMdnsQueryFromSocket(RawDatagramSocket socket, String serviceType) async {
     try {
-      if (_mdnsSockets.isEmpty) {
+      final List<RawDatagramSocket> socketSnapshot = List<RawDatagramSocket>.from(_mdnsSockets);
+      if (socketSnapshot.isEmpty) {
         _log('mDNS: No Windows mDNS sockets available for TX');
         return;
       }
 
-      _log('mDNS: Sending query for $serviceType from ${_mdnsSockets.length} socket(s)');
-      for (final RawDatagramSocket txSocket in _mdnsSockets) {
+      _log('mDNS: Sending query for $serviceType from ${socketSnapshot.length} socket(s)');
+      for (final RawDatagramSocket txSocket in socketSnapshot) {
         final InternetAddress? interfaceAddress = txSocket.address == InternetAddress.anyIPv4
             ? null
             : txSocket.address;
@@ -2560,7 +2644,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           await _sendMdnsQueryFromSocket(_mdnsSocket ?? _mdnsSockets.first, serviceType);
           
           // Wait for responses
-          final String portList = _mdnsSockets
+          final List<RawDatagramSocket> socketSnapshot = List<RawDatagramSocket>.from(_mdnsSockets);
+          final String portList = socketSnapshot
               .map((RawDatagramSocket s) => '${_mdnsSocketLabels[s] ?? s.address.address}:${s.port}')
               .join(', ');
           _log('mDNS: Waiting for responses on socket set: $portList');
