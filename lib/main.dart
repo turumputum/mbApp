@@ -735,9 +735,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Map<String, String> _chapterDescriptions = {};
   Map<String, String> _chapterWildcards = {}; // Maps wildcard patterns to actual chapter names
   
-  // mDNS socket (long-lived, opened at startup, closed at exit)
+  // mDNS sockets on Windows: ANY + per-interface, long-lived until reinit/exit.
   RawDatagramSocket? _mdnsSocket;
-  StreamSubscription<RawSocketEvent>? _mdnsSocketSubscription;
+  final List<RawDatagramSocket> _mdnsSockets = <RawDatagramSocket>[];
+  final List<StreamSubscription<RawSocketEvent>> _mdnsSocketSubscriptions = <StreamSubscription<RawSocketEvent>>[];
+  final Map<RawDatagramSocket, String> _mdnsSocketLabels = <RawDatagramSocket, String>{};
   ffi.DynamicLibrary? _ipHlpApi;
   ffi.NativeCallable<_IpInterfaceChangeCallbackNative>? _ipInterfaceChangeCallback;
   ffi.Pointer<ffi.Void> _ipInterfaceChangeHandleV4 = ffi.nullptr;
@@ -813,8 +815,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _startWindowsNetworkChangeWatcher();
   }
   
-  /// Initialize mDNS socket (long-lived, opened at startup)
-  /// Uses WinAPI directly: bind(INADDR_ANY:5353) + setsockopt(SO_REUSEADDR) + setsockopt(IP_ADD_MEMBERSHIP)
+  /// Initialize mDNS sockets (long-lived, opened at startup).
+  /// On Windows we open sockets on:
+  /// - anyIPv4:5353
+  /// - each active IPv4 interface address:5353
+  /// All sockets listen and all sockets transmit.
   Future<void> _initializeMdnsSocket() async {
     if (!Platform.isWindows) {
       // On non-Windows, we don't need a persistent socket
@@ -823,189 +828,99 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     
     try {
       await _closeMdnsSocket(logCloseMessage: false);
-      _log('mDNS: Initializing persistent socket on anyIPv4:5353 using WinAPI...');
-      
-      // Step 1: Bind to INADDR_ANY:5353
-      _mdnsSocket = await RawDatagramSocket.bind(
-        InternetAddress.anyIPv4, // INADDR_ANY - as per mdns-sd
-        5353, // mDNS port - SAME for sending and receiving
-        reuseAddress: true, // SO_REUSEADDR - will also set via WinAPI
-        reusePort: false, // Not supported on Windows
+      _log('mDNS: Initializing Windows socket set on port 5353 (ANY + per-interface)...');
+      const int mdnsPort = 5353;
+      final InternetAddress multicastAddress = InternetAddress('224.0.0.251');
+      final List<NetworkInterface> interfaces = await NetworkInterface.list(
+        includeLoopback: false,
+        includeLinkLocal: true,
+        type: InternetAddressType.IPv4,
       );
-      
-      _log('mDNS: Socket bound to anyIPv4:5353, port: ${_mdnsSocket!.port}');
-      
-      // Step 2: Configure socket using WinAPI directly
-      try {
-        // Load ws2_32.dll for WinSock API
-        final ffi.DynamicLibrary ws2_32 = ffi.DynamicLibrary.open('ws2_32.dll');
-        
-        // Get socket handle using reflection (RawDatagramSocket wraps a native socket)
-        // Note: This is a workaround since Dart doesn't expose socket handle directly
-        // We'll use the socket's native handle through the internal implementation
-        
-        // Define setsockopt function signature
-        // int setsockopt(SOCKET s, int level, int optname, const char *optval, int optlen);
-        final setsockoptNative = ffi.Pointer<ffi.NativeFunction<
-            ffi.Int32 Function(
-              ffi.IntPtr, // SOCKET (handle)
-              ffi.Int32,  // level
-              ffi.Int32,  // optname
-              ffi.Pointer<ffi.Void>, // optval
-              ffi.Int32,  // optlen
-            )>>.fromAddress(ws2_32.lookup('setsockopt').address);
-        
-        final setsockopt = setsockoptNative.asFunction<
-            int Function(
-              int, // SOCKET
-              int, // level
-              int, // optname
-              ffi.Pointer<ffi.Void>, // optval
-              int, // optlen
-            )>();
-        
-        // Get socket handle - try to access through native socket
-        // This is a workaround: we'll use a different approach
-        // Actually, we need to get the native handle from RawDatagramSocket
-        // Since Dart doesn't expose this, we'll configure via Dart API first, then via WinAPI
-        
-        // Step 2a: Set SO_REUSEADDR via WinAPI (redundant but ensures it's set correctly)
-        _log('mDNS: Setting SO_REUSEADDR via WinAPI...');
-        final int socketHandle = _getNativeSocketHandle(_mdnsSocket!);
-        if (socketHandle != -1) {
-          final int SO_REUSEADDR = 0x0004; // SOL_SOCKET level
-          final int SOL_SOCKET = 0xFFFF;
-          final ffi.Pointer<ffi.Int32> optval = malloc.allocate<ffi.Int32>(1);
-          optval.value = 1; // Enable SO_REUSEADDR
-          
-          final int result = setsockopt(
-            socketHandle,
-            SOL_SOCKET,
-            SO_REUSEADDR,
-            optval.cast<ffi.Void>(),
-            ffi.sizeOf<ffi.Int32>(),
-          );
-          
-          malloc.free(optval);
-          
-          if (result == 0) {
-            _log('mDNS: SO_REUSEADDR set successfully via WinAPI');
-          } else {
-            _log('mDNS: Failed to set SO_REUSEADDR via WinAPI, result: $result');
-          }
-          
-          // Step 2b: Set IP_ADD_MEMBERSHIP via WinAPI (CRITICAL for Windows)
-          _log('mDNS: Setting IP_ADD_MEMBERSHIP via WinAPI for 224.0.0.251...');
-          
-          // Define ip_mreq structure
-          // struct ip_mreq {
-          //   struct in_addr imr_multiaddr;  // 4 bytes
-          //   struct in_addr imr_interface;  // 4 bytes
-          // };
-          final ffi.Pointer<ffi.Uint8> mreq = malloc.allocate<ffi.Uint8>(8);
-          
-          // imr_multiaddr = 224.0.0.251 (E0 00 00 FB)
-          mreq[0] = 0xE0; // 224
-          mreq[1] = 0x00; // 0
-          mreq[2] = 0x00; // 0
-          mreq[3] = 0xFB; // 251
-          
-          // imr_interface = INADDR_ANY (0.0.0.0)
-          mreq[4] = 0x00;
-          mreq[5] = 0x00;
-          mreq[6] = 0x00;
-          mreq[7] = 0x00;
-          
-          final int IPPROTO_IP = 0;
-          final int IP_ADD_MEMBERSHIP = 12; // IP_ADD_MEMBERSHIP constant
-          
-          final int mreqResult = setsockopt(
-            socketHandle,
-            IPPROTO_IP,
-            IP_ADD_MEMBERSHIP,
-            mreq.cast<ffi.Void>(),
-            8, // sizeof(ip_mreq)
-          );
-          
-          malloc.free(mreq);
-          
-          if (mreqResult == 0) {
-            _log('mDNS: IP_ADD_MEMBERSHIP set successfully via WinAPI');
-          } else {
-            final int errorCode = _getLastError(ws2_32);
-            _log('mDNS: Failed to set IP_ADD_MEMBERSHIP via WinAPI, error code: $errorCode');
-          }
-        } else {
-          _log('mDNS: Could not get native socket handle, using Dart API only');
-          // Fallback to Dart API
-          try {
-            final InternetAddress multicastAddress = InternetAddress('224.0.0.251');
-            _mdnsSocket!.joinMulticast(multicastAddress);
-            _log('mDNS: Joined multicast group via Dart API');
-          } catch (e) {
-            _log('mDNS: Failed to join multicast group: ${e.toString().split('\n').first}');
-          }
+      final Map<String, NetworkInterface> interfaceByAddress = <String, NetworkInterface>{};
+      final List<InternetAddress> bindAddresses = <InternetAddress>[InternetAddress.anyIPv4];
+      final Set<String> seen = <String>{'0.0.0.0'};
+      for (final NetworkInterface networkInterface in interfaces) {
+        for (final InternetAddress address in networkInterface.addresses) {
+          final String ip = address.address;
+          if (ip.isEmpty || ip == '0.0.0.0') continue;
+          if (!seen.add(ip)) continue;
+          bindAddresses.add(address);
+          interfaceByAddress[ip] = networkInterface;
         }
-      } catch (e, stackTrace) {
-        _log('mDNS: Error configuring socket via WinAPI: ${e.toString().split('\n').first}');
-        _log('mDNS: Stack trace: ${stackTrace.toString().split('\n').take(3).join('\n')}');
-        // Fallback to Dart API
+      }
+
+      for (final InternetAddress bindAddress in bindAddresses) {
         try {
-          final InternetAddress multicastAddress = InternetAddress('224.0.0.251');
-          _mdnsSocket!.joinMulticast(multicastAddress);
-          _log('mDNS: Joined multicast group via Dart API (fallback)');
-        } catch (e2) {
-          _log('mDNS: Failed to join multicast group via Dart API: ${e2.toString().split('\n').first}');
+          final RawDatagramSocket socket = await RawDatagramSocket.bind(
+            bindAddress,
+            mdnsPort,
+            reuseAddress: true,
+            reusePort: false,
+          );
+          final String label = bindAddress == InternetAddress.anyIPv4
+              ? 'ANY(0.0.0.0)'
+              : '${interfaceByAddress[bindAddress.address]?.name ?? "iface"} (${bindAddress.address})';
+          _mdnsSockets.add(socket);
+          _mdnsSocketLabels[socket] = label;
+
+          try {
+            socket.joinMulticast(multicastAddress, interfaceByAddress[bindAddress.address]);
+            _log('mDNS: Joined multicast on $label');
+          } catch (e) {
+            _log('mDNS: Failed multicast join on $label: ${e.toString().split('\n').first}');
+          }
+
+          try {
+            socket.broadcastEnabled = true;
+          } catch (_) {}
+
+          final StreamSubscription<RawSocketEvent> subscription = socket.listen(
+            (RawSocketEvent event) => _handleMdnsSocketEvent(socket, event),
+            onError: (Object error) {
+              _log('mDNS: Socket error on $label: $error');
+            },
+            cancelOnError: false,
+          );
+          _mdnsSocketSubscriptions.add(subscription);
+          _log('mDNS: Socket ready on $label:${socket.port}');
+        } catch (e) {
+          _log('mDNS: Failed to bind socket on ${bindAddress.address}:5353: ${e.toString().split('\n').first}');
         }
       }
-      
-      // Step 3: Enable broadcast (optional, but may help)
-      try {
-        _mdnsSocket!.broadcastEnabled = true;
-        _log('mDNS: Broadcast enabled on socket');
-      } catch (e) {
-        _log('mDNS: Failed to enable broadcast: ${e.toString().split('\n').first}');
+
+      _mdnsSocket = _mdnsSockets.isNotEmpty ? _mdnsSockets.first : null;
+      if (_mdnsSockets.isEmpty) {
+        _log('mDNS: Failed to initialize Windows socket set (no sockets bound)');
+      } else {
+        _mdnsPacketCount = 0;
+        _log('mDNS: Windows socket set ready (${_mdnsSockets.length} socket(s))');
       }
-      
-      // Step 4: Set up persistent listener
-      _mdnsPacketCount = 0;
-      _mdnsSocketSubscription = _mdnsSocket!.listen(
-        (RawSocketEvent event) {
-          if (event == RawSocketEvent.read && _mdnsSocket != null) {
-            try {
-              final Datagram? datagram = _mdnsSocket!.receive();
-              if (datagram != null && datagram.data.isNotEmpty) {
-                _mdnsPacketCount++;
-                _log('mDNS: ===== Received packet #$_mdnsPacketCount =====');
-                _log('mDNS: From: ${datagram.address.address}:${datagram.port}');
-                _log('mDNS: Size: ${datagram.data.length} bytes');
-                _logDnsPacketDetails('RX(win)', datagram.data);
-                
-                // Parse DNS packet details, then extract devices
-                final Map<String, dynamic>? parsedData = _parseAndLogDnsPacket(datagram.data);
-                if (parsedData != null) {
-                  _processMdnsDeviceData(parsedData);
-                }
-              }
-            } catch (e) {
-              _log('mDNS: Error processing packet: ${e.toString().split('\n').first}');
-            }
-          }
-        },
-        onError: (error) {
-          _log('mDNS: Socket error: $error');
-        },
-        cancelOnError: false,
-      );
-      
-      // Give socket a moment to be ready
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      _log('mDNS: Persistent socket ready and listening (WinAPI approach)');
-      
     } catch (e, stackTrace) {
       _log('mDNS: Failed to initialize socket: ${e.toString().split('\n').first}');
       _log('mDNS: Error stack trace: ${stackTrace.toString().split('\n').take(5).join('\n')}');
       _mdnsSocket = null;
+    }
+  }
+
+  void _handleMdnsSocketEvent(RawDatagramSocket socket, RawSocketEvent event) {
+    if (event != RawSocketEvent.read) return;
+    if (!_mdnsSockets.contains(socket)) return;
+    final String socketLabel = _mdnsSocketLabels[socket] ?? socket.address.address;
+    try {
+      final Datagram? datagram = socket.receive();
+      if (datagram == null || datagram.data.isEmpty) return;
+      _mdnsPacketCount++;
+      _log('mDNS: ===== Received packet #$_mdnsPacketCount on $socketLabel =====');
+      _log('mDNS: From: ${datagram.address.address}:${datagram.port}');
+      _log('mDNS: Size: ${datagram.data.length} bytes');
+      _logDnsPacketDetails('RX(win)', datagram.data);
+
+      final Map<String, dynamic>? parsedData = _parseAndLogDnsPacket(datagram.data);
+      if (parsedData != null) {
+        _processMdnsDeviceData(parsedData);
+      }
+    } catch (e) {
+      _log('mDNS: Error processing packet on $socketLabel: ${e.toString().split('\n').first}');
     }
   }
 
@@ -1178,71 +1093,21 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   Future<void> _closeMdnsSocket({bool logCloseMessage = true}) async {
-    await _mdnsSocketSubscription?.cancel();
-    _mdnsSocketSubscription = null;
-    _mdnsSocket?.close();
+    for (final StreamSubscription<RawSocketEvent> subscription in _mdnsSocketSubscriptions) {
+      await subscription.cancel();
+    }
+    _mdnsSocketSubscriptions.clear();
+    for (final RawDatagramSocket socket in _mdnsSockets) {
+      socket.close();
+    }
+    _mdnsSockets.clear();
+    _mdnsSocketLabels.clear();
     _mdnsSocket = null;
     if (logCloseMessage) {
-      _log('mDNS: Persistent socket closed');
+      _log('mDNS: Windows socket set closed');
     }
   }
   
-  /// Get native socket handle from RawDatagramSocket using reflection
-  /// Returns -1 if handle cannot be obtained
-  int _getNativeSocketHandle(RawDatagramSocket socket) {
-    try {
-      // RawDatagramSocket internally uses _NativeSocket which has a native handle
-      // We'll try to access it through reflection
-      final dynamic socketDynamic = socket;
-      
-      // Try to access the internal _socket field
-      // RawDatagramSocket -> _NativeSocket -> native handle
-      if (socketDynamic != null) {
-        // Access _socket field (internal implementation detail)
-        final dynamic nativeSocket = socketDynamic._socket;
-        if (nativeSocket != null) {
-          // Try to get native handle from _NativeSocket
-          // The handle is typically stored in a field like _nativeSocket or similar
-          try {
-            final int handle = nativeSocket._nativeSocket as int;
-            return handle;
-          } catch (e) {
-            // Try alternative field names
-            try {
-              final int handle = nativeSocket.handle as int;
-              return handle;
-            } catch (e2) {
-              try {
-                final int handle = nativeSocket.fd as int;
-                return handle;
-              } catch (e3) {
-                // All attempts failed
-              }
-            }
-          }
-        }
-      }
-    } catch (e) {
-      // Reflection failed - this is expected if internal structure changed
-      _log('mDNS: Could not access native socket handle via reflection: ${e.toString().split('\n').first}');
-    }
-    return -1;
-  }
-  
-  /// Get last error code from WinSock
-  int _getLastError(ffi.DynamicLibrary ws2_32) {
-    try {
-      final wsagetlasterrorNative = ffi.Pointer<ffi.NativeFunction<
-          ffi.Int32 Function()>>.fromAddress(
-        ws2_32.lookup('WSAGetLastError').address,
-      );
-      final wsagetlasterror = wsagetlasterrorNative.asFunction<int Function()>();
-      return wsagetlasterror();
-    } catch (e) {
-      return -1;
-    }
-  }
-
   /// Detailed DNS packet dump for Windows RawDatagramSocket mDNS path.
   void _logDnsPacketDetails(String direction, Uint8List data) {
     _log('mDNS: [$direction] packet length: ${data.length} bytes');
@@ -2603,67 +2468,29 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
-  /// Send mDNS query for Windows:
-  /// receive socket stays bound to anyIPv4:5353,
-  /// transmit uses separate temporary socket per interface.
+  /// Send mDNS query from each active Windows mDNS socket:
+  /// ANY + each interface-bound socket.
   Future<void> _sendMdnsQueryFromSocket(RawDatagramSocket socket, String serviceType) async {
     try {
-      final List<InternetAddress> sendAddresses = await _getWindowsMdnsSendAddresses();
-      if (sendAddresses.isEmpty) {
-        _log('mDNS: No usable IPv4 interfaces for explicit TX; fallback to receive socket');
-        await _sendMdnsQuery(socket, serviceType);
+      if (_mdnsSockets.isEmpty) {
+        _log('mDNS: No Windows mDNS sockets available for TX');
         return;
       }
 
-      _log('mDNS: Explicit TX for $serviceType over ${sendAddresses.length} interface(s)');
-      for (final InternetAddress interfaceAddress in sendAddresses) {
-        RawDatagramSocket? txSocket;
-        try {
-          txSocket = await RawDatagramSocket.bind(
-            interfaceAddress,
-            0,
-            reuseAddress: false,
-            reusePort: false,
-          );
-          await _sendMdnsQuery(
-            txSocket,
-            serviceType,
-            interfaceAddress: interfaceAddress,
-          );
-        } catch (e) {
-          _log('mDNS: Failed TX socket on ${interfaceAddress.address}: ${e.toString().split('\n').first}');
-        } finally {
-          txSocket?.close();
-        }
+      _log('mDNS: Sending query for $serviceType from ${_mdnsSockets.length} socket(s)');
+      for (final RawDatagramSocket txSocket in _mdnsSockets) {
+        final InternetAddress? interfaceAddress = txSocket.address == InternetAddress.anyIPv4
+            ? null
+            : txSocket.address;
+        await _sendMdnsQuery(
+          txSocket,
+          serviceType,
+          interfaceAddress: interfaceAddress,
+        );
       }
     } catch (e) {
       _log('mDNS: Failed to send query from socket: ${e.toString().split('\n').first}');
     }
-  }
-
-  Future<List<InternetAddress>> _getWindowsMdnsSendAddresses() async {
-    final List<InternetAddress> result = <InternetAddress>[];
-    final Set<String> seen = <String>{};
-    try {
-      final List<NetworkInterface> interfaces = await NetworkInterface.list(
-        includeLoopback: false,
-        includeLinkLocal: true,
-        type: InternetAddressType.IPv4,
-      );
-      for (final NetworkInterface networkInterface in interfaces) {
-        for (final InternetAddress address in networkInterface.addresses) {
-          final String ip = address.address;
-          if (ip.isEmpty || ip == '0.0.0.0') continue;
-          if (address.isLoopback || address.isMulticast) continue;
-          if (!seen.add(ip)) continue;
-          result.add(address);
-          _log('mDNS: TX candidate interface ${networkInterface.name} ($ip)');
-        }
-      }
-    } catch (e) {
-      _log('mDNS: Failed to enumerate TX interfaces: ${e.toString().split('\n').first}');
-    }
-    return result;
   }
 
   Future<String> _describeOutgoingInterface(RawDatagramSocket socket) async {
@@ -2711,17 +2538,16 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       // This set is used per scan cycle to avoid duplicates and detect missing devices.
       _mdnsDiscoveredDevices.clear();
       
-      final Set<String> uniqueDeviceIds = <String>{}; // Track unique device identifiers
       final List<String> serviceTypes = ['_ftp._tcp'];
       
       if (Platform.isWindows) {
-        // Use persistent socket (opened at startup)
-        if (_mdnsSocket == null) {
-          _log('mDNS: Socket not initialized yet, waiting...');
+        // Use persistent socket set (ANY + per-interface, opened at startup)
+        if (_mdnsSockets.isEmpty) {
+          _log('mDNS: Socket set not initialized yet, waiting...');
           // Wait a bit for socket initialization
           await Future<void>.delayed(const Duration(milliseconds: 500));
-          if (_mdnsSocket == null) {
-            _log('mDNS: Socket still not available, skipping scan');
+          if (_mdnsSockets.isEmpty) {
+            _log('mDNS: Socket set still not available, skipping scan');
             return;
           }
         }
@@ -2730,11 +2556,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         for (final String serviceType in serviceTypes) {
           _log('mDNS: Discovering $serviceType services...');
           
-          // Send query from the persistent socket (mdns-sd approach)
-          await _sendMdnsQueryFromSocket(_mdnsSocket!, serviceType);
+          // Send from each socket in the persistent socket set.
+          await _sendMdnsQueryFromSocket(_mdnsSocket ?? _mdnsSockets.first, serviceType);
           
           // Wait for responses
-          _log('mDNS: Waiting for responses on socket (port ${_mdnsSocket!.port})...');
+          final String portList = _mdnsSockets
+              .map((RawDatagramSocket s) => '${_mdnsSocketLabels[s] ?? s.address.address}:${s.port}')
+              .join(', ');
+          _log('mDNS: Waiting for responses on socket set: $portList');
           await Future<void>.delayed(const Duration(seconds: 8));
           _log('mDNS: Finished waiting for $serviceType (received $_mdnsPacketCount packet(s) total)');
                 }
