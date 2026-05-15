@@ -3857,7 +3857,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         }
       }
     }
-    final dynamic defaultValue = keyInfo['valueDefault'];
+    // Config value items use "default" (mode options use "valueDefault").
+    final dynamic defaultValue = keyInfo['default'] ?? keyInfo['valueDefault'];
     if (defaultValue != null) {
       final String value = defaultValue.toString().trim();
       if (value.isNotEmpty && value.toLowerCase() != 'null' && seen.add(value)) {
@@ -4676,6 +4677,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       }
       return 'Option from manifest';
     } else if (suggestion.endsWith('=')) {
+      // Configuration key — show its manifest info (description, default
+      // value, allowed values) for the chapter the cursor is in. This covers
+      // group chapters [SYSTEM], [LAN], [MQTT], [UDP], [OSC], ... .
+      final String keyName = suggestion.substring(0, suggestion.length - 1);
+      final String? chapter =
+          _getCurrentChapterFromTextEditor() ?? _selectedChapter;
+      if (chapter != null) {
+        final String? info = _getKeyContextFromManifest(chapter, keyName);
+        if (info != null && info.isNotEmpty) {
+          return info;
+        }
+      }
       return 'Configuration key';
     } else if (suggestion.startsWith('SLOT_')) {
       return 'Slot reference';
@@ -4686,6 +4699,47 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
   
+  /// Build the autocomplete context line for a config key from the manifest:
+  /// description (if the manifest provides one), default value and the list
+  /// of allowed values. Returns null when the manifest knows nothing.
+  String? _getKeyContextFromManifest(String chapter, String key) {
+    final Map<String, dynamic>? keyInfo = _getKeyInfo(chapter, key);
+    if (keyInfo == null) {
+      return null;
+    }
+    final List<String> parts = <String>[];
+
+    final String? description = keyInfo['description']?.toString();
+    if (description != null &&
+        description.isNotEmpty &&
+        description.toLowerCase() != 'null') {
+      parts.add(_normalizeDescription(description));
+    }
+
+    // Config value items store the default in "default" (mode options use
+    // "valueDefault"); accept either for robustness.
+    final dynamic defaultValue = keyInfo['default'] ?? keyInfo['valueDefault'];
+    if (defaultValue != null) {
+      final String value = defaultValue.toString().trim();
+      if (value.isNotEmpty && value.toLowerCase() != 'null') {
+        parts.add('по умолчанию: $value');
+      }
+    }
+
+    final dynamic enumValues = keyInfo['enum'];
+    if (enumValues is List && enumValues.isNotEmpty) {
+      final String joined = enumValues
+          .map((dynamic e) => e.toString().trim())
+          .where((String e) => e.isNotEmpty && e.toLowerCase() != 'null')
+          .join(', ');
+      if (joined.isNotEmpty) {
+        parts.add('значения: $joined');
+      }
+    }
+
+    return parts.isEmpty ? null : parts.join('  •  ');
+  }
+
   /// Normalize description text by removing unnecessary spaces, line breaks, and escape symbols
   String _normalizeDescription(String? description) {
     if (description == null || description.isEmpty) {
@@ -6795,7 +6849,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   Map<String, dynamic>? _getKeyInfo(String chapter, String key) {
     // Find the manifest chapter that matches this config chapter
-    final String? manifestChapter = _chapterWildcards[chapter];
+    final String? manifestChapter = _getManifestChapterForChapter(chapter);
     if (manifestChapter == null) {
       return null;
     }
