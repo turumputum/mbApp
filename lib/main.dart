@@ -150,6 +150,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   List<String> _currentSuggestions = [];
   OverlayEntry? _suggestionOverlay;
   int _selectedSuggestionIndex = -1;
+  /// User-chosen size of the autocomplete popup (set by dragging its
+  /// bottom-right handle). Null means use the default size.
+  Size? _suggestionOverlaySize;
   // Console autocomplete state
   final FocusNode _consoleInputFocusNode = FocusNode();
   // Save button long-press state
@@ -3932,10 +3935,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (!mounted || _isRebuilding || _isLayoutInProgress) return;
     
     final Size screenSize = MediaQuery.of(context).size;
-    
-    // Calculate actual popup dimensions
-    final double popupWidth = 300.0;
-    final double popupHeight = (suggestions.length * 40.0).clamp(80.0, 300.0);
+
+    // Default popup size: 3x the previous box (300 -> 900 wide, the 80..300
+    // height range -> 240..900). The user can resize it afterwards by
+    // dragging the bottom-right handle; the chosen size lives in
+    // _suggestionOverlaySize. Sizes are always kept inside the main window.
+    final double defaultWidth = 900.0;
+    final double defaultHeight = (suggestions.length * 40.0).clamp(240.0, 900.0);
+    final double popupWidth =
+        _fitPopupWidth(_suggestionOverlaySize?.width ?? defaultWidth, 20.0, screenSize);
+    final double popupHeight =
+        _fitPopupHeight(_suggestionOverlaySize?.height ?? defaultHeight, 20.0, screenSize);
     
     // Get the real actual cursor coordinates using TextPainter and getOffsetForCaret (based on Stack Overflow solution)
     // Safety check to prevent assertion failures during widget rebuilds
@@ -3944,7 +3954,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       final double popupX = (screenSize.width - popupWidth) / 2;
       final double popupY = (screenSize.height - popupHeight) / 2;
       _suggestionOverlay = OverlayEntry(
-        builder: (context) => _buildSuggestionOverlayContent(suggestions, currentWord, popupX, popupY, popupWidth, popupHeight),
+        builder: (context) => _buildSuggestionOverlayContent(suggestions, currentWord, popupX, popupY, defaultWidth, defaultHeight, screenSize),
       );
       Overlay.of(context).insert(_suggestionOverlay!);
       return;
@@ -3956,7 +3966,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       final double popupX = (screenSize.width - popupWidth) / 2;
       final double popupY = (screenSize.height - popupHeight) / 2;
       _suggestionOverlay = OverlayEntry(
-        builder: (context) => _buildSuggestionOverlayContent(suggestions, currentWord, popupX, popupY, popupWidth, popupHeight),
+        builder: (context) => _buildSuggestionOverlayContent(suggestions, currentWord, popupX, popupY, defaultWidth, defaultHeight, screenSize),
       );
       Overlay.of(context).insert(_suggestionOverlay!);
       return;
@@ -4019,16 +4029,48 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (popupY + popupHeight > screenSize.height - 50.0) {
       popupY = screenSize.height - popupHeight - 50.0;
     }
-    
+
+    // Ensure popup doesn't go off the top edge (a tall popup may push it up)
+    if (popupY < 20.0) {
+      popupY = 20.0;
+    }
+
     _suggestionOverlay = OverlayEntry(
-      builder: (context) => _buildSuggestionOverlayContent(suggestions, currentWord, popupX, popupY, popupWidth, popupHeight),
+      builder: (context) => _buildSuggestionOverlayContent(suggestions, currentWord, popupX, popupY, defaultWidth, defaultHeight, screenSize),
     );
     
     Overlay.of(context).insert(_suggestionOverlay!);
   }
 
-  /// Build suggestion overlay content with keyboard navigation support
-  Widget _buildSuggestionOverlayContent(List<String> suggestions, String currentWord, double popupX, double popupY, double popupWidth, double popupHeight) {
+  /// Clamp a popup width so the popup, anchored at [popupX], stays inside the
+  /// main window. Used both for positioning and for live resizing.
+  double _fitPopupWidth(double width, double popupX, Size screen) {
+    const double minWidth = 280.0;
+    final double maxWidth = screen.width - popupX - 20.0;
+    if (maxWidth <= minWidth) return minWidth;
+    return width.clamp(minWidth, maxWidth);
+  }
+
+  /// Clamp a popup height so the popup, anchored at [popupY], stays inside the
+  /// main window. Used both for positioning and for live resizing.
+  double _fitPopupHeight(double height, double popupY, Size screen) {
+    const double minHeight = 120.0;
+    final double maxHeight = screen.height - popupY - 20.0;
+    if (maxHeight <= minHeight) return minHeight;
+    return height.clamp(minHeight, maxHeight);
+  }
+
+  /// Build suggestion overlay content with keyboard navigation support.
+  ///
+  /// [defaultWidth]/[defaultHeight] are used when the user has not resized the
+  /// popup; once resized, [_suggestionOverlaySize] takes over. The size is
+  /// always clamped to [screenSize] so the popup never leaves the main window.
+  Widget _buildSuggestionOverlayContent(List<String> suggestions, String currentWord, double popupX, double popupY, double defaultWidth, double defaultHeight, Size screenSize) {
+    final double popupWidth = _fitPopupWidth(
+        _suggestionOverlaySize?.width ?? defaultWidth, popupX, screenSize);
+    final double popupHeight = _fitPopupHeight(
+        _suggestionOverlaySize?.height ?? defaultHeight, popupY, screenSize);
+
     return Positioned(
       left: popupX,
       top: popupY,
@@ -4043,48 +4085,86 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: Colors.blue[300]!, width: 1),
           ),
-          child: Column(
+          child: Stack(
             children: [
               // Suggestions list
-              Expanded(
-                child: ListView.builder(
-                  controller: _suggestionScrollController,
-                  padding: EdgeInsets.zero,
-                  itemCount: suggestions.length,
-                  itemBuilder: (context, index) {
-                    final String suggestion = suggestions[index];
-                    final bool isSelected = index == _selectedSuggestionIndex;
-                    
-                    return Container(
+              Column(
+                children: [
+                  Expanded(
+                    child: ListView.builder(
+                      controller: _suggestionScrollController,
+                      padding: EdgeInsets.zero,
+                      itemCount: suggestions.length,
+                      itemBuilder: (context, index) {
+                        final String suggestion = suggestions[index];
+                        final bool isSelected = index == _selectedSuggestionIndex;
+
+                        return Container(
+                          decoration: BoxDecoration(
+                            color: isSelected ? Colors.blue[100] : null,
+                            border: index < suggestions.length - 1
+                              ? Border(bottom: BorderSide(color: Colors.grey[200]!))
+                              : null,
+                          ),
+                          child: ListTile(
+                            dense: true,
+                            leading: _getSuggestionIcon(suggestion),
+                            title: Text(
+                              suggestion,
+                              style: TextStyle(
+                                fontFamily: 'monospace',
+                                fontSize: 12,
+                                fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                              ),
+                            ),
+                            subtitle: Text(
+                              _getSuggestionContext(suggestion),
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: isSelected ? Colors.blue[700] : Colors.grey[600],
+                              ),
+                            ),
+                            onTap: () => _selectSuggestion(suggestion, currentWord, fromMouseClick: true),
+                            hoverColor: Colors.blue[50],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              // Bottom-right drag handle to resize the popup.
+              Positioned(
+                right: 0,
+                bottom: 0,
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.resizeUpLeftDownRight,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onPanUpdate: (DragUpdateDetails details) {
+                      _suggestionOverlaySize = Size(
+                        _fitPopupWidth(popupWidth + details.delta.dx, popupX, screenSize),
+                        _fitPopupHeight(popupHeight + details.delta.dy, popupY, screenSize),
+                      );
+                      _suggestionOverlay?.markNeedsBuild();
+                    },
+                    child: Container(
+                      width: 22,
+                      height: 22,
                       decoration: BoxDecoration(
-                        color: isSelected ? Colors.blue[100] : null,
-                        border: index < suggestions.length - 1
-                          ? Border(bottom: BorderSide(color: Colors.grey[200]!))
-                          : null,
-                      ),
-                      child: ListTile(
-                        dense: true,
-                        leading: _getSuggestionIcon(suggestion),
-                        title: Text(
-                          suggestion,
-                          style: TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 12,
-                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                          ),
+                        color: Colors.blue[50],
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(8),
+                          bottomRight: Radius.circular(7),
                         ),
-                        subtitle: Text(
-                          _getSuggestionContext(suggestion),
-                          style: TextStyle(
-                            fontSize: 10,
-                            color: isSelected ? Colors.blue[700] : Colors.grey[600],
-                          ),
-                        ),
-                        onTap: () => _selectSuggestion(suggestion, currentWord, fromMouseClick: true),
-                        hoverColor: Colors.blue[50],
                       ),
-                    );
-                  },
+                      child: Icon(
+                        Icons.south_east,
+                        size: 14,
+                        color: Colors.blue[400],
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ],
