@@ -146,7 +146,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Timer? _serialPresenceTimer;
   String _lastText = '';
   TextSelection? _lastSelection;
-  List<String> _cachedSuggestions = [];
   String? _currentWord;
   List<String> _currentSuggestions = [];
   OverlayEntry? _suggestionOverlay;
@@ -1552,8 +1551,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         
         _lastText = currentText;
         _lastSelection = currentSelection;
-        // Clear cached suggestions when text changes to refresh chapter suggestions
-        _cachedSuggestions.clear();
         _autocompleteTimer?.cancel();
         _autocompleteTimer = Timer(const Duration(milliseconds: 150), () {
           if (mounted) {
@@ -1929,8 +1926,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return modes;
   }
 
-  /// Update autocomplete suggestions based on current text
-  void _updateAutocompleteSuggestions() {
+  /// Update autocomplete suggestions based on current text.
+  ///
+  /// When [forceShow] is true (manual trigger, e.g. Ctrl+Space) the popup is
+  /// shown even if the current word is empty or shorter than the usual
+  /// 2-character threshold used for automatic triggering.
+  void _updateAutocompleteSuggestions({bool forceShow = false}) {
     // Safety check to prevent assertion failures during widget rebuilds
     if (!mounted) return;
     
@@ -2041,9 +2042,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     //_log('DEBUG: Text before cursor: "${text.substring(0, cursorPos)}"');
     //_log('DEBUG: Start: $start, End: $end, Cursor: $cursorPos');
     
-    if (word.length >= 2) {
+    if (word.length >= 2 || forceShow) {
       //_log('DEBUG: Calling _getAutocompleteSuggestions with: "$word"');
-      final List<String> suggestions = _getAutocompleteSuggestions(word);
+      final List<String> suggestions = _getAutocompleteSuggestions(word, forceShow: forceShow);
       //_log('DEBUG: Got ${suggestions.length} suggestions');
       if (mounted) {
         setState(() {
@@ -3567,9 +3568,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     }
   }
 
-  /// Get autocomplete suggestions (same data sources as Config design tab)
-  List<String> _getAutocompleteSuggestions(String currentWord) {
-    if (currentWord.isEmpty) return [];
+  /// Get autocomplete suggestions (same data sources as Config design tab).
+  ///
+  /// When [forceShow] is true the full cached suggestion list is returned even
+  /// for an empty [currentWord], so a manual trigger (Ctrl+Space) can open the
+  /// popup on an empty field.
+  List<String> _getAutocompleteSuggestions(String currentWord, {bool forceShow = false}) {
+    if (currentWord.isEmpty && !forceShow) return [];
     
     //_log('DEBUG: _getAutocompleteSuggestions called with: "$currentWord"');
     // Normalize the word to handle spaces around "=" (e.g., "mode = " becomes "mode=")
@@ -3715,130 +3720,206 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         }
       }
     } else {
-      // Use cached suggestions for faster filtering
-      if (_cachedSuggestions.isEmpty) {
-        _buildCachedSuggestions();
-      }
-      
-      // Fast filtering of cached suggestions (already unique)
-      for (final String suggestion in _cachedSuggestions) {
-        if (suggestion.toLowerCase().contains(lowerWord)) {
-          // Don't suggest if it exactly matches what's already typed
-          if (suggestion.toLowerCase() != lowerWord) {
-            suggestions.add(suggestion);
-            if (suggestions.length >= 8) break; // Limit to 8 for display
-          }
-        }
-      }
-    }
-    
-    return suggestions.toList();
-  }
+      // Generic key/value autocomplete, scoped to the chapter the cursor is
+      // currently in. Suggestions from other chapters are never offered.
+      final String? currentChapter =
+          _getCurrentChapterFromTextEditor() ?? _selectedChapter;
 
-  /// Build cached suggestions once for faster filtering (ensuring uniqueness)
-  void _buildCachedSuggestions() {
-    final Set<String> uniqueSuggestions = <String>{};
-    
-    // Get existing chapters from both parsed config and text editor
-    final Set<String> existingChapters = <String>{};
-    existingChapters.addAll(_parsedConfig.keys);
-    
-    // Also check text editor content for chapters that might not be parsed yet
-    final String text = _configEditorController.text;
-    final List<String> lines = text.split('\n');
-    for (final String line in lines) {
-      final String trimmedLine = line.trim();
-      if (trimmedLine.startsWith('[') && trimmedLine.endsWith(']') && trimmedLine.length > 2) {
-        final String chapter = trimmedLine.substring(1, trimmedLine.length - 1);
-        existingChapters.add(chapter);
-      }
-    }
-    
-    // Add SLOT chapter suggestions (numbers 0-9, excluding existing ones)
-    for (int i = 0; i <= 9; i++) {
-      final String slotChapter = 'SLOT_$i';
-      if (!existingChapters.contains(slotChapter)) {
-        uniqueSuggestions.add('[$slotChapter]');
-      }
-    }
-    
-    // Add other chapter names from manifest (excluding existing ones)
-    for (final String manifestChapter in _availableKeys.keys) {
-      // Skip wildcard patterns and SLOT chapters (handled above)
-      if (!manifestChapter.contains('*') && !manifestChapter.startsWith('SLOT_')) {
-        if (!existingChapters.contains(manifestChapter)) {
-          uniqueSuggestions.add('[$manifestChapter]');
-        }
-      }
-    }
-    
-    // Add key names from all chapters (same as Config design)
-    for (final String chapter in _parsedConfig.keys) {
-      for (final String key in _parsedConfig[chapter]!.keys) {
-        uniqueSuggestions.add('$key=');
-      }
-    }
-    
-    // Add topic-based slot names (same as Config design)
-    try {
-      final List<String> topicSlots = _getTopicBasedSourceSlots();
-      uniqueSuggestions.addAll(topicSlots);
-    } catch (e) {
-      // Silent error handling
-    }
-    
-    // Add manifest values for topics (same as Config design)
-    if (_manifestData.isNotEmpty) {
-      try {
-        if (_manifestData.containsKey('modes') && _manifestData['modes'] is List) {
-          final List<dynamic> modesArray = _manifestData['modes'] as List<dynamic>;
-          
-          for (final dynamic modeItem in modesArray) {
-            if (modeItem is Map<String, dynamic> && modeItem['options'] is List) {
-              final List<dynamic> modeOptions = modeItem['options'] as List<dynamic>;
-              
-              for (final dynamic option in modeOptions) {
-                if (option is Map<String, dynamic>) {
-                  final String? name = option['name']?.toString();
-                  final String? valueDefault = option['valueDefault']?.toString();
-                  
-                  if (name != null && name.toLowerCase().contains('topic') && valueDefault != null && valueDefault != 'null') {
-                    final String cleanValue = valueDefault
-                        .replaceAll(RegExp(r'^/+'), '')
-                        .replaceAll(RegExp(r'[^\w\-]'), '_')
-                        .replaceAll(RegExp(r'^_+'), '')
-                        .replaceAll(RegExp(r'_+$'), '')
-                        .replaceAll(RegExp(r'_+'), '_');
-                    
-                    uniqueSuggestions.add(cleanValue);
-                  }
-                }
-              }
+      final int eqIndex = normalizedWord.indexOf('=');
+      if (eqIndex >= 0) {
+        // Cursor is in value position of a plain key (e.g. "LAN_enable=tr").
+        // Offer only values declared for that key in the manifest.
+        final String keyName = normalizedWord.substring(0, eqIndex).trim();
+        final String partialValue =
+            normalizedWord.substring(eqIndex + 1).trim().toLowerCase();
+        if (currentChapter != null && keyName.isNotEmpty) {
+          for (final String value
+              in _getValueSuggestionsForKey(currentChapter, keyName)) {
+            if (partialValue.isNotEmpty &&
+                !value.toLowerCase().contains(partialValue)) {
+              continue;
+            }
+            final String full = '$keyName=$value';
+            if (full.toLowerCase() != lowerWord) {
+              suggestions.add(full);
+              if (suggestions.length >= 15) break;
             }
           }
         }
-      } catch (e) {
-        // Silent error handling
+      } else {
+        // Cursor is in key position. Suggest only keys valid for this chapter.
+        for (final String key in _getKeySuggestionsForChapter(currentChapter)) {
+          final String suggestion = '$key=';
+          final String lower = suggestion.toLowerCase();
+          if (lower != lowerWord && lower.contains(lowerWord)) {
+            suggestions.add(suggestion);
+            if (suggestions.length >= 15) break;
+          }
+        }
+
+        // New chapter headers ([SYSTEM], [LAN], [SLOT_x], ...) are offered
+        // only when the line directly above the cursor is empty (a blank
+        // group separator), and always appended after the keys so they sit
+        // at the end of the list.
+        if (_isLineAboveCursorEmpty()) {
+          for (final String header in _getNewChapterHeaderSuggestions()) {
+            final String lower = header.toLowerCase();
+            if (lower != lowerWord && lower.contains(lowerWord)) {
+              suggestions.add(header);
+              if (suggestions.length >= 18) break;
+            }
+          }
+        }
       }
     }
-    
-    // Add common config patterns
-    uniqueSuggestions.addAll([
-      'mode=',
-      'options=',
-      'crosslink=',
-      'SLOT_',
-      'trigger',
-      'data',
-      'sync',
-      'true',
-      'false',
-      'on',
-      'off',
-    ]);
-    
-    // Convert Set to List to maintain order and ensure uniqueness
-    _cachedSuggestions = uniqueSuggestions.toList();
+
+    return suggestions.toList();
+  }
+
+  /// Resolve the manifest chapter (possibly a wildcard such as "SLOT_*") that
+  /// describes the given config [chapter]. Returns null when the manifest has
+  /// no matching chapter.
+  String? _getManifestChapterForChapter(String chapter) {
+    if (_availableKeys.containsKey(chapter)) {
+      return chapter;
+    }
+    final String? mapped = _chapterWildcards[chapter];
+    if (mapped != null) {
+      return mapped;
+    }
+    // The wildcard cache only covers chapters present in _parsedConfig; match
+    // live for chapters typed in the editor but not yet parsed.
+    for (final String manifestChapter in _availableKeys.keys) {
+      if (manifestChapter.contains('*')) {
+        final RegExp regex = RegExp(
+          '^${manifestChapter.replaceAll('*', '.*')}\$',
+          caseSensitive: false,
+        );
+        if (regex.hasMatch(chapter)) {
+          return manifestChapter;
+        }
+      }
+    }
+    return null;
+  }
+
+  /// Key names valid for [chapter]: keys declared for it in the manifest plus
+  /// any keys already present in that chapter of config.ini. Keys from other
+  /// chapters are never included.
+  List<String> _getKeySuggestionsForChapter(String? chapter) {
+    if (chapter == null) {
+      return const <String>[];
+    }
+    final List<String> result = <String>[];
+    final Set<String> seen = <String>{};
+
+    final String? manifestChapter = _getManifestChapterForChapter(chapter);
+    if (manifestChapter != null) {
+      for (final String key
+          in _availableKeys[manifestChapter] ?? const <String>[]) {
+        // SLOT_* keys are slot sub-keys, not config keys (see
+        // _getAvailableKeysForChapter).
+        if (!key.startsWith('SLOT_') && seen.add(key)) {
+          result.add(key);
+        }
+      }
+    }
+    // Include keys already written in this chapter so they keep being
+    // offered even when the manifest does not list them (e.g. older firmware).
+    for (final String key
+        in _parsedConfig[chapter]?.keys ?? const <String>[]) {
+      if (seen.add(key)) {
+        result.add(key);
+      }
+    }
+    return result;
+  }
+
+  /// Values declared in the manifest for [key] inside [chapter] (enum entries
+  /// and/or the default value). Empty when the manifest offers nothing.
+  List<String> _getValueSuggestionsForKey(String chapter, String key) {
+    final Map<String, dynamic>? keyInfo = _getKeyInfo(chapter, key);
+    if (keyInfo == null) {
+      return const <String>[];
+    }
+    final List<String> values = <String>[];
+    final Set<String> seen = <String>{};
+
+    final dynamic enumValues = keyInfo['enum'];
+    if (enumValues is List) {
+      for (final dynamic enumValue in enumValues) {
+        final String value = enumValue.toString().trim();
+        if (value.isNotEmpty && value.toLowerCase() != 'null' && seen.add(value)) {
+          values.add(value);
+        }
+      }
+    }
+    final dynamic defaultValue = keyInfo['valueDefault'];
+    if (defaultValue != null) {
+      final String value = defaultValue.toString().trim();
+      if (value.isNotEmpty && value.toLowerCase() != 'null' && seen.add(value)) {
+        values.add(value);
+      }
+    }
+    return values;
+  }
+
+  /// True when the line directly above the cursor's line is empty/whitespace
+  /// — i.e. the cursor sits at a blank-line group separator.
+  bool _isLineAboveCursorEmpty() {
+    final String text = _configEditorController.text;
+    final int cursorPos = _configEditorController.selection.baseOffset;
+    if (cursorPos < 0 || cursorPos > text.length) {
+      return false;
+    }
+    // Start of the cursor's own line.
+    int lineStart = cursorPos;
+    while (lineStart > 0 && text[lineStart - 1] != '\n') {
+      lineStart--;
+    }
+    if (lineStart == 0) {
+      return false; // No line above the first line.
+    }
+    // The previous line ends at the '\n' located at lineStart - 1.
+    int prevStart = lineStart - 2;
+    while (prevStart >= 0 && text[prevStart] != '\n') {
+      prevStart--;
+    }
+    prevStart++;
+    return text.substring(prevStart, lineStart - 1).trim().isEmpty;
+  }
+
+  /// Chapter headers that can still be inserted (those not already present in
+  /// the editor). Group chapters come first, SLOT_x slots last.
+  List<String> _getNewChapterHeaderSuggestions() {
+    final Set<String> existingChapters = <String>{};
+    existingChapters.addAll(_parsedConfig.keys);
+    for (final String line in _configEditorController.text.split('\n')) {
+      final String trimmedLine = line.trim();
+      if (trimmedLine.startsWith('[') &&
+          trimmedLine.endsWith(']') &&
+          trimmedLine.length > 2) {
+        existingChapters.add(trimmedLine.substring(1, trimmedLine.length - 1));
+      }
+    }
+
+    final List<String> headers = <String>[];
+    // Group chapters declared in the manifest (non-wildcard, non-SLOT) first.
+    for (final String manifestChapter in _availableKeys.keys) {
+      if (!manifestChapter.contains('*') &&
+          !manifestChapter.startsWith('SLOT_') &&
+          !existingChapters.contains(manifestChapter)) {
+        headers.add('[$manifestChapter]');
+      }
+    }
+    // SLOT_x slots last.
+    for (int i = 0; i <= 9; i++) {
+      final String slotChapter = 'SLOT_$i';
+      if (!existingChapters.contains(slotChapter)) {
+        headers.add('[$slotChapter]');
+      }
+    }
+    return headers;
   }
 
   /// Show modal suggestion overlay
@@ -4999,6 +5080,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   /// Handle keyboard events for Tab navigation
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is KeyDownEvent) {
+      // Ctrl+Space - manually trigger the autocomplete popup, even on an
+      // empty field / before any word has been typed.
+      if (event.logicalKey == LogicalKeyboardKey.space &&
+          HardwareKeyboard.instance.isControlPressed) {
+        _autocompleteTimer?.cancel();
+        _updateAutocompleteSuggestions(forceShow: true);
+        return KeyEventResult.handled;
+      }
       if (event.logicalKey == LogicalKeyboardKey.tab && _suggestionOverlay != null && _currentSuggestions.isNotEmpty) {
         if (_selectedSuggestionIndex == -1) {
           // First Tab press - select first suggestion
@@ -5738,8 +5827,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
         // Initialize the text editor with the loaded content
         _synchronizeEditorWithCachedContent();
-        // Rebuild cached suggestions with new config data
-        _cachedSuggestions.clear();
       } else {
         _log('config.ini not found on removable drives');
       }
@@ -5876,7 +5963,6 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               _log('FTP: Successfully downloaded config.ini (${_cachedConfigContent!.length} bytes)');
               _parseConfigFile(_cachedConfigContent!);
               _synchronizeEditorWithCachedContent();
-              _cachedSuggestions.clear();
               try {
                 await tempConfigFile.delete();
               } catch (_) {}
