@@ -70,8 +70,27 @@ class ConfigValidationIssue {
   final String message;
 }
 
+/// A styled character range within the config editor used to highlight a
+/// single crosslink rule (its trigger, arrow and event parts).
+class CrossLinkSpan {
+  CrossLinkSpan({
+    required this.start,
+    required this.end,
+    this.color,
+    this.background,
+    this.bold = false,
+  });
+
+  final int start; // absolute char offset (inclusive)
+  final int end;   // absolute char offset (exclusive)
+  final Color? color;
+  final Color? background;
+  final bool bold;
+}
+
 class ConfigEditorController extends TextEditingController {
   Set<int> _errorLines = <int>{};
+  List<CrossLinkSpan> _crossLinkSpans = <CrossLinkSpan>[];
 
   void setErrorLines(Set<int> lines) {
     if (_errorLines.length == lines.length && _errorLines.containsAll(lines)) {
@@ -81,6 +100,26 @@ class ConfigEditorController extends TextEditingController {
     notifyListeners();
   }
 
+  void setCrossLinkSpans(List<CrossLinkSpan> spans) {
+    if (_crossLinkSpansEqual(_crossLinkSpans, spans)) return;
+    _crossLinkSpans = spans;
+    notifyListeners();
+  }
+
+  static bool _crossLinkSpansEqual(List<CrossLinkSpan> a, List<CrossLinkSpan> b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i].start != b[i].start ||
+          a[i].end != b[i].end ||
+          a[i].color != b[i].color ||
+          a[i].background != b[i].background ||
+          a[i].bold != b[i].bold) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   @override
   TextSpan buildTextSpan({
     required BuildContext context,
@@ -88,6 +127,11 @@ class ConfigEditorController extends TextEditingController {
     required bool withComposing,
   }) {
     final TextStyle baseStyle = style ?? const TextStyle();
+    final String textValue = text;
+    if (textValue.isEmpty) {
+      return TextSpan(style: baseStyle, text: textValue);
+    }
+
     final TextStyle errorStyle = baseStyle.copyWith(
       decoration: TextDecoration.underline,
       decorationColor: Colors.red.shade400,
@@ -95,22 +139,63 @@ class ConfigEditorController extends TextEditingController {
       decorationThickness: 1.8,
     );
 
-    final List<InlineSpan> children = <InlineSpan>[];
-    final String textValue = text;
-    if (textValue.isEmpty) {
-      return TextSpan(style: baseStyle, text: textValue);
+    final int n = textValue.length;
+
+    // Line start offsets, for mapping a char offset back to its line number.
+    final List<int> lineStarts = <int>[0];
+    // Boundaries where the style may change: line starts, crosslink span edges.
+    final Set<int> boundarySet = <int>{0, n};
+    for (int i = 0; i < n; i++) {
+      if (textValue.codeUnitAt(i) == 0x0A) {
+        lineStarts.add(i + 1);
+        boundarySet.add(i);
+        boundarySet.add(i + 1);
+      }
+    }
+    for (final CrossLinkSpan s in _crossLinkSpans) {
+      if (s.start >= 0 && s.start <= n) boundarySet.add(s.start);
+      if (s.end >= 0 && s.end <= n) boundarySet.add(s.end);
+    }
+    final List<int> boundaries = boundarySet.toList()..sort();
+
+    int lineIndexForOffset(int off) {
+      int lo = 0, hi = lineStarts.length - 1, ans = 0;
+      while (lo <= hi) {
+        final int mid = (lo + hi) >> 1;
+        if (lineStarts[mid] <= off) {
+          ans = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      return ans;
     }
 
-    final List<String> lines = textValue.split('\n');
-    for (int i = 0; i < lines.length; i++) {
-      final bool hasError = _errorLines.contains(i + 1);
-      children.add(TextSpan(
-        text: lines[i],
-        style: hasError ? errorStyle : baseStyle,
-      ));
-      if (i < lines.length - 1) {
-        children.add(const TextSpan(text: '\n'));
+    CrossLinkSpan? spanForRange(int a, int b) {
+      for (final CrossLinkSpan s in _crossLinkSpans) {
+        if (s.end > s.start && a >= s.start && b <= s.end) return s;
       }
+      return null;
+    }
+
+    final List<InlineSpan> children = <InlineSpan>[];
+    for (int i = 0; i + 1 < boundaries.length; i++) {
+      final int a = boundaries[i];
+      final int b = boundaries[i + 1];
+      if (b <= a) continue;
+      final bool isErrorLine = _errorLines.contains(lineIndexForOffset(a) + 1);
+      final CrossLinkSpan? span = spanForRange(a, b);
+
+      TextStyle segStyle = isErrorLine ? errorStyle : baseStyle;
+      if (span != null) {
+        segStyle = segStyle.copyWith(
+          color: span.color,
+          backgroundColor: span.background,
+          fontWeight: span.bold ? FontWeight.w600 : null,
+        );
+      }
+      children.add(TextSpan(text: textValue.substring(a, b), style: segStyle));
     }
 
     return TextSpan(style: baseStyle, children: children);
@@ -126,6 +211,10 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   final List<DeviceItem> _devices = <DeviceItem>[];
+  /// Identifiers of serial devices that are kept on screen while their port is
+  /// temporarily gone (selected/edited or console-bound device). Rendered with
+  /// a red cross in the list so the user knows the controller is disconnected.
+  final Set<String> _disconnectedSerialIds = <String>{};
   DeviceListFilter _deviceListFilter = DeviceListFilter.serial;
   List<DeviceItem> get _displayedDevices => _devices
       .where((DeviceItem d) =>
@@ -1557,6 +1646,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         _autocompleteTimer?.cancel();
         _autocompleteTimer = Timer(const Duration(milliseconds: 150), () {
           if (mounted) {
+            _updateCrossLinkHighlighting();
             _updateAutocompleteSuggestions();
             // If mode changed and user is typing crosslink=, refresh suggestions
             if (modeChanged) {
@@ -1654,7 +1744,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     final List<String> sourceSegments = sourceLeft.split('/');
     final String sourceSlot = sourceSegments.first.trim();
-    final String? sourceReport = sourceSegments.length > 1 ? sourceSegments[1].trim() : null;
+    // Report topics are multi-segment (e.g. "event/endOfTrack"): take the whole
+    // path after the slot, not just the first segment.
+    final String? sourceReport = sourceSegments.length > 1
+        ? sourceSegments.sublist(1).join('/').trim()
+        : null;
     if (sourceSlot.isEmpty) {
       errors.add('Пустой source slot в "$trimmedRule"');
       return errors;
@@ -1699,7 +1793,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     final List<String> targetSegments = targetLeft.split('/');
     final String targetSlot = targetSegments.first.trim();
-    final String? targetCommand = targetSegments.length > 1 ? targetSegments[1].trim() : null;
+    // Commands are multi-segment (e.g. "action/play"): take the whole path
+    // after the slot, not just the first segment.
+    final String? targetCommand = targetSegments.length > 1
+        ? targetSegments.sublist(1).join('/').trim()
+        : null;
     if (targetSlot.isEmpty) {
       errors.add('Пустой target slot в "$trimmedRule"');
       return errors;
@@ -2140,7 +2238,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     
     // Filter out ports that are in use by console
     final List<String> portsToScan = ports.where((String portName) {
-      if (_consolePort?.name == portName) {
+      // Skip by bound name (not the live handle): during a reboot the console
+      // handle is null while reconnecting, but we still must not let the
+      // scanner grab the port out from under the reconnect loop.
+      if (_consolePortName == portName) {
         //_log('Serial: skipping $portName (in use by console)');
         return false;
       }
@@ -2161,21 +2262,48 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   /// Remove serial devices immediately when their tty/COM port is gone.
   /// No dirty-check exception: missing port means device is unavailable.
   void _removeUnavailableSerialDevices(Set<String> availablePorts) {
-    final List<String> removedIds = _devices
-        .where((DeviceItem d) => d.kind == 'serial' && !availablePorts.contains(d.identifier))
-        .map((DeviceItem d) => d.identifier)
+    // Serial devices whose port is currently gone.
+    final List<DeviceItem> missing = _devices
+        .where((DeviceItem d) =>
+            d.kind == 'serial' && !availablePorts.contains(d.identifier))
         .toList(growable: false);
-    if (removedIds.isEmpty) return;
 
-    final bool selectedRemoved = _selected != null &&
-        _selected!.kind == 'serial' &&
-        removedIds.contains(_selected!.identifier);
-    if (selectedRemoved) {
-      _log('Serial: selected device ${_selected!.identifier} became unavailable; dropping unsaved edits');
-      _clearConfigTabContent();
+    // Devices we keep on screen instead of dropping: the one being edited
+    // (selected) and the console-bound one. Their ports vanish briefly during a
+    // reboot; we mark them disconnected (red cross) rather than silently losing
+    // them, and the background scan / console reconnect loop restores them.
+    final Set<String> keepDisconnected = <String>{};
+    for (final DeviceItem d in missing) {
+      final bool isSelected = _selected != null &&
+          _selected!.kind == 'serial' &&
+          _selected!.identifier == d.identifier;
+      final bool isConsole = d.identifier == _consolePortName;
+      if (isSelected || isConsole) {
+        keepDisconnected.add(d.identifier);
+      }
     }
 
+    final List<String> removedIds = missing
+        .where((DeviceItem d) => !keepDisconnected.contains(d.identifier))
+        .map((DeviceItem d) => d.identifier)
+        .toList(growable: false);
+
+    // Recompute markers each scan: a device drops out of keepDisconnected once
+    // its port reappears, which clears the red cross automatically.
+    final bool markersChanged = keepDisconnected.length != _disconnectedSerialIds.length ||
+        !_disconnectedSerialIds.containsAll(keepDisconnected);
+    if (removedIds.isEmpty && !markersChanged) return;
+
+    final Set<String> newlyDisconnected = keepDisconnected.difference(_disconnectedSerialIds);
+    final Set<String> reconnected = _disconnectedSerialIds
+        .difference(keepDisconnected)
+        .where((String id) => !removedIds.contains(id))
+        .toSet();
+
     setState(() {
+      _disconnectedSerialIds
+        ..clear()
+        ..addAll(keepDisconnected);
       _devices.removeWhere((DeviceItem d) => d.kind == 'serial' && removedIds.contains(d.identifier));
       if (_selected != null && _selected!.kind == 'serial' && removedIds.contains(_selected!.identifier)) {
         _selected = _devices.isNotEmpty ? _devices.first : null;
@@ -2185,6 +2313,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     for (final String id in removedIds) {
       _log('Serial: removed unavailable device $id (port missing)');
+    }
+    for (final String id in newlyDisconnected) {
+      _log('Serial: device $id disconnected (port missing), kept on screen');
+    }
+    for (final String id in reconnected) {
+      _log('Serial: device $id reconnected');
     }
   }
 
@@ -2695,9 +2829,26 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                           itemBuilder: (BuildContext context, int index) {
                             final DeviceItem item = _displayedDevices[index];
                             final bool selected = identical(_selected, item);
+                            final bool disconnected = item.kind == 'serial' &&
+                                _disconnectedSerialIds.contains(item.identifier);
                             return ListTile(
-                              title: Text(item.displayName),
-                              subtitle: Text('${item.kind} • ${item.identifier}'),
+                              title: Row(
+                                children: <Widget>[
+                                  if (disconnected)
+                                    const Padding(
+                                      padding: EdgeInsets.only(right: 6),
+                                      child: Tooltip(
+                                        message: 'Контроллер отключён',
+                                        child: Icon(Icons.cancel,
+                                            color: Colors.red, size: 18),
+                                      ),
+                                    ),
+                                  Expanded(child: Text(item.displayName)),
+                                ],
+                              ),
+                              subtitle: Text(disconnected
+                                  ? '${item.kind} • ${item.identifier} • отключён'
+                                  : '${item.kind} • ${item.identifier}'),
                               selected: selected,
                               selectedTileColor: Theme.of(context).colorScheme.primaryContainer,
                               selectedColor: Theme.of(context).colorScheme.onPrimaryContainer,
@@ -3569,6 +3720,115 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         SnackBar(content: Text('Найдено ошибок: ${issues.length}')),
       );
     }
+  }
+
+  /// Live highlighting of crosslink rules in the text editor. Each *valid* rule
+  /// is shown as a green "bubble" (background tint) with its trigger (left of
+  /// `->`) coloured green and its event (right of `->`) coloured blue. Invalid
+  /// rules are left unstyled. Several rules per line are supported.
+  void _updateCrossLinkHighlighting() {
+    if (!mounted) return;
+    _configEditorController.setCrossLinkSpans(
+      _computeCrossLinkSpans(_configEditorController.text),
+    );
+  }
+
+  List<CrossLinkSpan> _computeCrossLinkSpans(String content) {
+    final List<CrossLinkSpan> spans = <CrossLinkSpan>[];
+    if (content.isEmpty) return spans;
+
+    final Color triggerColor = Colors.green.shade800; // trigger (source)
+    final Color eventColor = Colors.blue.shade700;    // event (target)
+    final Color bubble = Colors.green.withValues(alpha: 0.16);
+
+    final List<String> lines = content.split('\n');
+
+    // Collect SLOT_ chapters present in the config to build the slot universe,
+    // mirroring _validateConfigFormat's availableSlots.
+    final Set<String> seenSlotChapters = <String>{};
+    for (final String raw in lines) {
+      final String t = raw.trim();
+      if (t.startsWith('[') && t.endsWith(']') && t.length > 2) {
+        final String name = t.substring(1, t.length - 1).trim();
+        if (name.startsWith('SLOT_')) seenSlotChapters.add(name);
+      }
+    }
+    final Set<String> availableSlots = <String>{
+      ..._getTopicBasedSourceSlots(),
+      ...seenSlotChapters,
+    };
+
+    int offset = 0;
+    String? currentChapter;
+    for (final String raw in lines) {
+      final int lineStart = offset;
+      offset += raw.length + 1; // account for the split '\n'
+      final String trimmed = raw.trim();
+      if (trimmed.isEmpty || trimmed.startsWith('#') || trimmed.startsWith(';')) {
+        continue;
+      }
+      if (trimmed.startsWith('[') && trimmed.endsWith(']') && trimmed.length > 2) {
+        currentChapter = trimmed.substring(1, trimmed.length - 1).trim();
+        continue;
+      }
+      if (currentChapter == null || !currentChapter.startsWith('SLOT_')) continue;
+
+      final int eqIdx = raw.indexOf('=');
+      if (eqIdx <= 0) continue;
+      if (raw.substring(0, eqIdx).trim().toLowerCase() != 'crosslink') continue;
+
+      final String value = raw.substring(eqIdx + 1);
+      if (value.trim().isEmpty || value.trim().toLowerCase() == 'empty') continue;
+
+      // Split the value into comma-separated rules, tracking absolute offsets.
+      int partOffset = lineStart + eqIdx + 1;
+      for (final String part in value.split(',')) {
+        final int partStart = partOffset;
+        partOffset += part.length + 1; // account for the split ','
+        final String rule = part.trim();
+        if (rule.isEmpty) continue;
+
+        // Only valid rules get the bubble.
+        final bool valid = _validateSingleCrossLinkRule(
+          rule,
+          availableSlots: availableSlots,
+        ).isEmpty;
+        if (!valid) continue;
+
+        final int arrowRel = rule.indexOf('->');
+        if (arrowRel < 0) continue;
+
+        final int lead = part.length - part.trimLeft().length;
+        final int ruleStart = partStart + lead;
+        final int ruleEnd = ruleStart + rule.length;
+        final int arrowStart = ruleStart + arrowRel;
+        final int arrowEnd = arrowStart + 2;
+
+        // Trigger (left of arrow) — green, on the bubble.
+        spans.add(CrossLinkSpan(
+          start: ruleStart,
+          end: arrowStart,
+          color: triggerColor,
+          background: bubble,
+          bold: true,
+        ));
+        // The arrow itself — neutral text, still on the bubble.
+        spans.add(CrossLinkSpan(
+          start: arrowStart,
+          end: arrowEnd,
+          background: bubble,
+        ));
+        // Event (right of arrow) — blue, on the bubble.
+        spans.add(CrossLinkSpan(
+          start: arrowEnd,
+          end: ruleEnd,
+          color: eventColor,
+          background: bubble,
+          bold: true,
+        ));
+      }
+    }
+    return spans;
   }
 
   /// Get autocomplete suggestions (same data sources as Config design tab).
@@ -5341,27 +5601,37 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   SerialPort? _consolePort;
+  /// Name of the port the console is bound to. Stays set while the console is
+  /// active even if the underlying port is temporarily gone (device reboot),
+  /// so the reconnect loop knows which port to reopen.
+  String? _consolePortName;
+  /// Whether the console currently has a live, readable connection.
+  bool _consoleConnected = false;
   Timer? _consoleTimer;
   final StringBuffer _consoleBuffer = StringBuffer();
   final ScrollController _consoleScrollController = ScrollController();
 
   Future<void> _startSerialConsole(String portName) async {
     await _stopSerialConsole();
-    final SerialPort port = SerialPort(portName);
-    try {
-      if (!port.openReadWrite()) {
-        _log('Console: cannot open $portName');
-        port.dispose();
-        return;
-      }
-      final SerialPortConfig config = port.config;
-      config.baudRate = 115200;
-      port.config = config;
-      _consolePort = port;
-      _consoleTimer = Timer.periodic(const Duration(milliseconds: 200), (Timer t) {
-        if (_consolePort == null || !mounted) return;
+    _consolePortName = portName;
+    if (_openConsolePort()) {
+      _log('Console: connected to $portName');
+    } else {
+      _log('Console: cannot open $portName, will keep trying');
+    }
+    // Single periodic loop: reads when connected, otherwise tries to reconnect.
+    // This survives device reboots, where the port briefly disappears and the
+    // old handle becomes dead.
+    _consoleTimer = Timer.periodic(const Duration(milliseconds: 200), (Timer t) {
+      if (!mounted || _consolePortName == null) return;
+      if (_consoleConnected && _consolePort != null) {
         try {
           final int available = _consolePort!.bytesAvailable;
+          if (available < 0) {
+            // Negative byte count = port error (device rebooted / unplugged).
+            _handleConsoleDisconnect();
+            return;
+          }
           if (available > 0) {
             final Uint8List data = _consolePort!.read(available);
             _consoleBuffer.write(const Utf8Decoder(allowMalformed: true).convert(data));
@@ -5372,18 +5642,70 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           // No setState if no data - avoid unnecessary rebuilds
         } catch (e) {
           _log('Console: read error: $e');
+          _handleConsoleDisconnect();
         }
-      });
+      } else {
+        _tryReconnectConsole();
+      }
+    });
+  }
+
+  /// Open (or reopen) the port named by [_consolePortName] and configure it.
+  /// Returns true on success and marks the console as connected.
+  bool _openConsolePort() {
+    final String? portName = _consolePortName;
+    if (portName == null) return false;
+    final SerialPort port = SerialPort(portName);
+    try {
+      if (!port.openReadWrite()) {
+        port.dispose();
+        return false;
+      }
+      final SerialPortConfig config = port.config;
+      config.baudRate = 115200;
+      port.config = config;
+      _consolePort = port;
+      _consoleConnected = true;
+      return true;
     } catch (e) {
-      _log('Console: error: $e');
+      _log('Console: open error: $e');
       try { if (port.isOpen) port.close(); } catch (_) {}
       port.dispose();
+      return false;
+    }
+  }
+
+  /// Tear down the dead connection and enter reconnecting state.
+  void _handleConsoleDisconnect() {
+    if (!_consoleConnected && _consolePort == null) return;
+    _consoleConnected = false;
+    _log('Console: connection lost on $_consolePortName, attempting to reconnect');
+    _consoleBuffer.writeln('\n--- connection lost, reconnecting... ---');
+    try { if (_consolePort?.isOpen == true) _consolePort?.close(); } catch (_) {}
+    try { _consolePort?.dispose(); } catch (_) {}
+    _consolePort = null;
+    if (mounted) setState(() {});
+  }
+
+  /// Try to reopen the console port once it reappears (device finished booting).
+  void _tryReconnectConsole() {
+    final String? portName = _consolePortName;
+    if (portName == null) return;
+    // Only attempt while the OS actually lists the port; avoids hammering a
+    // missing device and racing the background scanner.
+    if (!SerialPort.availablePorts.contains(portName)) return;
+    if (_openConsolePort()) {
+      _log('Console: reconnected to $portName');
+      _consoleBuffer.writeln('--- reconnected ---\n');
+      if (mounted) setState(() {});
     }
   }
 
   Future<void> _stopSerialConsole() async {
     try { _consoleTimer?.cancel(); } catch (_) {}
     _consoleTimer = null;
+    _consoleConnected = false;
+    _consolePortName = null;
     try { if (_consolePort?.isOpen == true) _consolePort?.close(); } catch (_) {}
     try { _consolePort?.dispose(); } catch (_) {}
     _consolePort = null;
@@ -6948,6 +7270,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _lastSelection = _configEditorController.selection;
     _suspendEditorDirtyTracking = false;
     _refreshEditorDirtyState();
+    _updateCrossLinkHighlighting();
   }
 
   void _handleConfigPersisted(String configContent) {
@@ -6981,6 +7304,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _lastSelection = _configEditorController.selection;
     _suspendEditorDirtyTracking = false;
     _refreshEditorDirtyState(currentText: configContent);
+    _updateCrossLinkHighlighting();
   }
 
   Widget _buildSaveButton(VoidCallback? onPressed) {
@@ -7865,55 +8189,35 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return topicValues;
   }
 
-  /// Get topic default values from manifest.json for a specific mode
+  /// Get topic default values from manifest.json for a specific mode.
+  ///
+  /// As of manifest 3.57 the slot topic prefix lives in the mode-level
+  /// `trigger` (reports / source side) and `action` (commands / target side)
+  /// fields, e.g. `"deviceName/out_<n>"`. These prefixes are what the console
+  /// and cross-link builder use to address a slot, so we resolve them here.
   List<String> _getTopicDefaultsFromManifest(String mode, String slotNumber) {
     final List<String> topicDefaults = <String>[];
-    
+
     try {
       if (_manifestData.isEmpty) {
         return topicDefaults;
       }
-      
+
       if (_manifestData.containsKey('modes') && _manifestData['modes'] is List) {
         final List<dynamic> modesArray = _manifestData['modes'] as List<dynamic>;
-        
+
         for (final dynamic modeItem in modesArray) {
           if (modeItem is Map<String, dynamic>) {
             final String? modeName = modeItem['mode']?.toString();
-            
-            if (modeName == mode && modeItem['options'] is List) {
-              final List<dynamic> modeOptions = modeItem['options'] as List<dynamic>;
-              
-              for (final dynamic option in modeOptions) {
-                if (option is Map<String, dynamic>) {
-                  final String? name = option['name']?.toString();
-                  final String? defaultValue = option['valueDefault']?.toString();
-                  
-                  // Look for options whose names contain "topic" and have defaultValue
-                  if (name != null && name.toLowerCase().contains('topic') && defaultValue != null && defaultValue != 'null') {
-                    // Clean up the default value (preserve meaningful characters, only replace problematic ones)
-                    String cleanValue = defaultValue
-                        .replaceAll(RegExp(r'^/+'), '')       // Remove leading forward slashes
-                        .replaceAll(RegExp(r'[^\w\-]'), '_')  // Replace only problematic chars, keep alphanumeric, underscore, hyphen
-                        .replaceAll(RegExp(r'^_+'), '')       // Remove leading underscores
-                        .replaceAll(RegExp(r'_+$'), '')       // Remove trailing underscores
-                        .replaceAll(RegExp(r'_+'), '_');      // Replace multiple underscores with single
-                    
-                    //print('DEBUG: "$defaultValue" -> "$cleanValue"');
-                    
-                    // Check if the value already has underscore and number at the end
-                    if (_hasUnderscoreAndNumberAtEnd(cleanValue)) {
-                      // Replace the existing number with the correct slot number
-                      cleanValue = _replaceSlotNumber(cleanValue, slotNumber);
-                    } else {
-                      // Add slot number if it doesn't have underscore+number
-                      cleanValue = '${cleanValue}_$slotNumber';
-                    }
-                    
-                    if (cleanValue.isNotEmpty && !topicDefaults.contains(cleanValue)) {
-                      topicDefaults.add(cleanValue);
-                    }
-                  }
+
+            if (modeName == mode) {
+              // A mode may expose a trigger topic, an action topic, or both
+              // (e.g. in_out has trigger "in_<n>" and action "out_<n>").
+              for (final String field in const <String>['trigger', 'action']) {
+                final String? topic = _topicFromManifestField(
+                    modeItem[field]?.toString(), slotNumber);
+                if (topic != null && !topicDefaults.contains(topic)) {
+                  topicDefaults.add(topic);
                 }
               }
               break; // Found the mode, no need to continue
@@ -7927,14 +8231,33 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return topicDefaults;
   }
 
-  /// Replace the slot number in a value that already has underscore+number
-  String _replaceSlotNumber(String value, String newSlotNumber) {
-    // Remove the existing underscore+number at the end
-    final RegExp underscoreNumberRegex = RegExp(r'_\d+$');
-    final String baseValue = value.replaceAll(underscoreNumberRegex, '');
-    
-    // Add the new slot number
-    return '${baseValue}_$newSlotNumber';
+  /// Convert a manifest `trigger`/`action` value such as `"deviceName/out_<n>"`
+  /// into a concrete slot topic such as `"out_0"` for the given [slotNumber].
+  /// Returns null for empty/missing fields.
+  String? _topicFromManifestField(String? raw, String slotNumber) {
+    if (raw == null || raw.trim().isEmpty) {
+      return null;
+    }
+    String topic = raw.trim();
+
+    // Drop the leading device-name segment: "deviceName/out_<n>" -> "out_<n>".
+    final int slashIndex = topic.indexOf('/');
+    if (slashIndex >= 0) {
+      topic = topic.substring(slashIndex + 1);
+    }
+
+    // Substitute the slot-number placeholder.
+    topic = topic.replaceAll('<n>', slotNumber).trim();
+    if (topic.isEmpty) {
+      return null;
+    }
+
+    // Most topics already end with the slot number (e.g. "out_0"); for any that
+    // don't, append it so the topic still maps back to its slot.
+    if (!_hasUnderscoreAndNumberAtEnd(topic)) {
+      topic = '${topic}_$slotNumber';
+    }
+    return topic;
   }
 
   /// Get step-by-step cross link suggestions based on current input
