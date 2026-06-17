@@ -156,6 +156,33 @@ class ConfigEditorController extends TextEditingController {
       if (s.start >= 0 && s.start <= n) boundarySet.add(s.start);
       if (s.end >= 0 && s.end <= n) boundarySet.add(s.end);
     }
+
+    // Per-line bold info: section headers ([LAN]) bold the whole line; key=value
+    // lines bold the key name (everything before '='). Offset of '=' splits the
+    // bold key from the plain value; -1 means the line has no bold key part.
+    final int lineCount = lineStarts.length;
+    final List<int> keyEqOffset = List<int>.filled(lineCount, -1);
+    final List<bool> sectionLine = List<bool>.filled(lineCount, false);
+    for (int li = 0; li < lineCount; li++) {
+      final int ls = lineStarts[li];
+      final int le = (li + 1 < lineCount) ? lineStarts[li + 1] - 1 : n;
+      if (le <= ls) continue;
+      final String line = textValue.substring(ls, le);
+      final String trimmed = line.trim();
+      if (trimmed.isEmpty || trimmed.startsWith('#') || trimmed.startsWith(';')) {
+        continue;
+      }
+      if (trimmed.startsWith('[')) {
+        sectionLine[li] = true;
+        continue;
+      }
+      final int eq = line.indexOf('=');
+      if (eq > 0) {
+        keyEqOffset[li] = ls + eq;
+        boundarySet.add(ls + eq);
+      }
+    }
+
     final List<int> boundaries = boundarySet.toList()..sort();
 
     int lineIndexForOffset(int off) {
@@ -184,8 +211,11 @@ class ConfigEditorController extends TextEditingController {
       final int a = boundaries[i];
       final int b = boundaries[i + 1];
       if (b <= a) continue;
-      final bool isErrorLine = _errorLines.contains(lineIndexForOffset(a) + 1);
+      final int li = lineIndexForOffset(a);
+      final bool isErrorLine = _errorLines.contains(li + 1);
       final CrossLinkSpan? span = spanForRange(a, b);
+      final bool boldKey =
+          sectionLine[li] || (keyEqOffset[li] >= 0 && a < keyEqOffset[li]);
 
       TextStyle segStyle = isErrorLine ? errorStyle : baseStyle;
       if (span != null) {
@@ -194,6 +224,8 @@ class ConfigEditorController extends TextEditingController {
           backgroundColor: span.background,
           fontWeight: span.bold ? FontWeight.w600 : null,
         );
+      } else if (boldKey) {
+        segStyle = segStyle.copyWith(fontWeight: FontWeight.bold);
       }
       children.add(TextSpan(text: textValue.substring(a, b), style: segStyle));
     }
