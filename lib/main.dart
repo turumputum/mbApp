@@ -3629,28 +3629,18 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             .toList();
 
         for (final String token in optionTokens) {
-          if (!token.contains(':')) {
-            issues.add(ConfigValidationIssue(
-              lineNumber: lineNumber,
-              message: 'Неверный формат option "$token". Ожидается name:value',
-            ));
-            continue;
-          }
-
+          // A flag option is written as a bare name (no ":value"); its presence
+          // alone marks it active. Everything else uses name:value.
+          final bool hasDelimiter = token.contains(':');
           final int delimiterIndex = token.indexOf(':');
-          final String optionName = token.substring(0, delimiterIndex).trim();
-          final String optionRawValue = token.substring(delimiterIndex + 1).trim();
+          final String optionName =
+              (hasDelimiter ? token.substring(0, delimiterIndex) : token).trim();
+          final String optionRawValue =
+              hasDelimiter ? token.substring(delimiterIndex + 1).trim() : '';
           if (optionName.isEmpty) {
             issues.add(ConfigValidationIssue(
               lineNumber: lineNumber,
               message: 'Пустое имя option в "$token"',
-            ));
-            continue;
-          }
-          if (optionRawValue.isEmpty) {
-            issues.add(ConfigValidationIssue(
-              lineNumber: lineNumber,
-              message: 'Пустое значение option "$optionName"',
             ));
             continue;
           }
@@ -3668,6 +3658,32 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             issues.add(ConfigValidationIssue(
               lineNumber: lineNumber,
               message: 'Option "$optionName" недоступен для mode "$modeValue"',
+            ));
+            continue;
+          }
+
+          if (valueType.toLowerCase() == 'flag') {
+            // Flags carry no value; if one is supplied, point it out.
+            if (hasDelimiter) {
+              issues.add(ConfigValidationIssue(
+                lineNumber: lineNumber,
+                message: 'Флаг "$optionName" не принимает значение — укажите только имя',
+              ));
+            }
+            continue;
+          }
+
+          if (!hasDelimiter) {
+            issues.add(ConfigValidationIssue(
+              lineNumber: lineNumber,
+              message: 'Неверный формат option "$token". Ожидается name:value',
+            ));
+            continue;
+          }
+          if (optionRawValue.isEmpty) {
+            issues.add(ConfigValidationIssue(
+              lineNumber: lineNumber,
+              message: 'Пустое значение option "$optionName"',
             ));
             continue;
           }
@@ -4908,6 +4924,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       return Icon(Icons.settings, size: 16, color: Colors.green[600]);
     } else if (['true', 'false', 'on', 'off'].contains(suggestion)) {
       return Icon(Icons.check_circle, size: 16, color: Colors.green[600]);
+    } else if (!suggestion.contains(':') &&
+        _getOptionDescriptionFromManifest(suggestion.trim()) != null) {
+      // Bare flag option (presence = active).
+      return Icon(Icons.flag, size: 16, color: Colors.indigo[600]);
     } else {
       return Icon(Icons.topic, size: 16, color: Colors.purple[600]);
     }
@@ -4968,6 +4988,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         }
       }
       return 'Option from manifest';
+    } else if (!suggestion.startsWith('SLOT_') &&
+        _getOptionDescriptionFromManifest(suggestion.trim()) != null) {
+      // Bare option name — a flag option (presence = active, no value).
+      return _getOptionDescriptionFromManifest(suggestion.trim())!;
     } else if (suggestion.endsWith('=')) {
       // Configuration key — show its manifest info (description, default
       // value, allowed values) for the chapter the cursor is in. This covers
@@ -5461,11 +5485,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                   final String valueType = option['valueType']?.toString() ?? 'string';
                   
                   if (name != null && name.isNotEmpty) {
-                    // Handle flag type: suggest both "yes" and "no"
+                    // Flag type: presence alone means the flag is active, so
+                    // suggest just the bare name without any value.
                     if (valueType == 'flag') {
-                      optionSuggestions.add('$name:yes');
-                      optionSuggestions.add('$name:no');
-                      _log('DEBUG: Added flag option: $name:yes and $name:no');
+                      optionSuggestions.add(name);
+                      _log('DEBUG: Added flag option: $name');
                     } else if (valueType == 'enum') {
                       // Enum type: suggest all explicit values from manifest "values" list
                       if (option['values'] is List) {
