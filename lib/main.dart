@@ -903,8 +903,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _detailsTabControllerSerial = TabController(length: 3, vsync: this);
-    _detailsTabControllerMdns = TabController(length: 2, vsync: this);
+    _detailsTabControllerSerial = TabController(length: 2, vsync: this);
+    _detailsTabControllerMdns = TabController(length: 1, vsync: this);
     _detailsTabControllerSerial.addListener(_handleDetailsTabChangeSerial);
     _detailsTabControllerMdns.addListener(_handleDetailsTabChangeMdns);
     _setupAutocompleteListener();
@@ -1869,116 +1869,216 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (!_detailsTabControllerSerial.indexIsChanging &&
         _detailsTabControllerSerial.index != _currentDetailsTabIndex) {
       _currentDetailsTabIndex = _detailsTabControllerSerial.index;
-      if (_currentDetailsTabIndex == 0) _syncEditorFromParsedConfig();
-      else if (_currentDetailsTabIndex == 1) _refreshParsedConfigFromEditor();
+      // Tabs: 0 = Config edit, 1 = Console. Entering the console refreshes the
+      // parsed config from the editor so the command helper stays current.
+      if (_currentDetailsTabIndex == 1) _refreshParsedConfigFromEditor();
     }
   }
 
   void _handleDetailsTabChangeMdns() {
     if (!_detailsTabControllerMdns.indexIsChanging &&
         _detailsTabControllerMdns.index != _currentDetailsTabIndex) {
+      // Only the Config edit tab remains for mDNS devices.
       _currentDetailsTabIndex = _detailsTabControllerMdns.index;
-      if (_currentDetailsTabIndex == 0) _syncEditorFromParsedConfig();
-      else if (_currentDetailsTabIndex == 1) _refreshParsedConfigFromEditor();
     }
   }
 
-  /// Setup autocomplete listener for console input (crosslink suggestions starting from targetSlot)
+  /// Setup autocomplete listener for console input. Suggestions are summoned
+  /// explicitly with Ctrl+Space (see [_handleConsoleKeyEvent]); the listener
+  /// only keeps an already-open popup in sync with the typed text (live
+  /// filtering) and closes it when nothing matches.
   void _setupConsoleAutocompleteListener() {
     _consoleInputController.addListener(() {
       if (!mounted) return;
-      
-      // Cancel any pending timer
       _consoleAutocompleteTimer?.cancel();
-      
+      if (_consoleSuggestionOverlay == null) return;
+
       final String currentText = _consoleInputController.text;
-      
-      // Trigger suggestions based on patterns (without requiring "->")
-      // Pattern 1: Just text -> show target slots
-      // Pattern 2: "slot/" -> show target commands
-      // Pattern 3: "slot/command:" -> show target values
-      
-      if (currentText.isNotEmpty) {
-        // Delay to avoid showing suggestions during rapid typing
-        _consoleAutocompleteTimer = Timer(const Duration(milliseconds: 150), () {
-          if (!mounted) return;
-          
-          final List<String> suggestions = _getConsoleCrossLinkSuggestions(currentText);
-          if (suggestions.isNotEmpty) {
-            setState(() {
-              _consoleSuggestions = suggestions;
-              _consoleCurrentWord = currentText;
-            });
-            // Use Future.microtask to ensure widget tree is ready
-            Future.microtask(() {
-              if (mounted) {
-                _showConsoleSuggestionOverlay(suggestions, currentText);
-              }
-            });
-          } else {
-            _hideConsoleSuggestionOverlay();
-          }
-        });
-      } else {
-        _hideConsoleSuggestionOverlay();
+      _consoleAutocompleteTimer = Timer(const Duration(milliseconds: 150), () {
+        if (!mounted || _consoleSuggestionOverlay == null) return;
+        _refreshConsoleSuggestions(currentText);
+      });
+    });
+  }
+
+  /// Compute console suggestions for [currentText] and show/refresh the popup.
+  /// Hides the popup when there is nothing to suggest.
+  void _refreshConsoleSuggestions(String currentText) {
+    final List<String> suggestions = _getConsoleCrossLinkSuggestions(currentText);
+    if (suggestions.isEmpty) {
+      _hideConsoleSuggestionOverlay();
+      return;
+    }
+    setState(() {
+      _consoleSuggestions = suggestions;
+      _consoleCurrentWord = currentText;
+      _consoleSelectedSuggestionIndex = -1;
+    });
+    Future.microtask(() {
+      if (mounted) {
+        _showConsoleSuggestionOverlay(suggestions, currentText);
       }
     });
   }
 
-  /// Get crosslink suggestions for console input (starting from targetSlot step, without "->" trigger)
+  /// Build console command suggestions for the current [input]. Three steps,
+  /// detected by the first "/" and ":" (command names themselves contain "/",
+  /// so we split on the *first* delimiter only):
+  ///   Pattern 1: bare text         -> slot names
+  ///   Pattern 2: "slot/command"    -> commands (those taking a value carry a
+  ///                                   trailing ":" so the distinction is visible)
+  ///   Pattern 3: "slot/command:"   -> values
   List<String> _getConsoleCrossLinkSuggestions(String input) {
     final List<String> suggestions = <String>[];
-    
-    if (input.isEmpty) return suggestions;
-    
-    // Check if input contains "/" (indicating we might be looking for commands)
-    if (input.contains('/')) {
-      final List<String> parts = input.split('/');
-      if (parts.length >= 2) {
-        final String slotPart = parts[0];
-        final String afterSlash = parts[1];
-        
-        // Check if after "/" contains ":" (indicating we're looking for values)
-        if (afterSlash.contains(':')) {
-          // Pattern: "slot/command:" -> show target values
-          final List<String> valueParts = afterSlash.split(':');
-          final String valueFilter = valueParts.length > 1 ? valueParts[1] : '';
-          
-          final List<String> topicValues = _getTopicValuesFromSlotSilent(slotPart);
-          for (final String value in topicValues) {
-            if (valueFilter.isEmpty || value.toLowerCase().contains(valueFilter.toLowerCase())) {
-              if (value.toLowerCase() != valueFilter.toLowerCase()) {
-                suggestions.add(value);
-              }
-            }
+
+    final int slashIdx = input.indexOf('/');
+    if (slashIdx >= 0 && !_isConsoleValueContext(input)) {
+      // Device-level system commands ("system/getVersion") aren't tied to a
+      // slot, so their first segment never resolves to one. Offer them by
+      // matching the whole typed text once a "/" is present but no value yet.
+      _addMatchingSystemCommands(suggestions, input);
+    }
+    if (slashIdx >= 0) {
+      final String slotPart = input.substring(0, slashIdx);
+      final String afterSlash = input.substring(slashIdx + 1);
+      final int colonIdx = afterSlash.indexOf(':');
+
+      if (colonIdx >= 0) {
+        // Pattern 3: "slot/command:" -> the user is filling in the value. Keep
+        // the command list visible as context (the @/# footer explains the
+        // special values; concrete values are typed in directly).
+        for (final String command in _getTargetCommandsForSlot(slotPart)) {
+          if (command.isNotEmpty) {
+            suggestions.add(command);
           }
-        } else {
-          // Pattern: "slot/" -> show target commands
-          final List<String> commands = _getTargetCommandsForSlot(slotPart);
-          for (final String command in commands) {
-            if (command.isNotEmpty) {
-              if (afterSlash.isEmpty || command.toLowerCase().contains(afterSlash.toLowerCase())) {
-                if (command.toLowerCase() != afterSlash.toLowerCase()) {
-                  suggestions.add(command);
-                }
-              }
-            }
+        }
+      } else {
+        // Pattern 2: "slot/command" -> show commands. Append ":" to commands
+        // that expect a value so the user can tell them apart from plain ones.
+        final List<String> commands = _getTargetCommandsForSlot(slotPart);
+        for (final String command in commands) {
+          if (command.isEmpty) continue;
+          if (afterSlash.isNotEmpty &&
+              !command.toLowerCase().contains(afterSlash.toLowerCase())) {
+            continue;
           }
+          if (command.toLowerCase() == afterSlash.toLowerCase()) continue;
+          suggestions.add(
+            _commandTakesValue(slotPart, command) ? '$command:' : command,
+          );
         }
       }
     } else {
-      // Pattern: just text -> show target slots
+      // Pattern 1: bare text -> show slot names plus the device-level system
+      // commands, so both are discoverable from an empty prompt.
       final List<String> targetSlots = _getTopicBasedSourceSlots();
       for (final String slot in targetSlots) {
-        if (input.isEmpty || slot.toLowerCase().contains(input.toLowerCase())) {
-          if (slot.toLowerCase() != input.toLowerCase()) {
-            suggestions.add(slot);
-          }
+        if (input.isNotEmpty &&
+            !slot.toLowerCase().contains(input.toLowerCase())) {
+          continue;
         }
+        if (slot.toLowerCase() == input.toLowerCase()) continue;
+        suggestions.add(slot);
       }
+      _addMatchingSystemCommands(suggestions, input);
     }
-    
+
     return suggestions;
+  }
+
+  /// Append system commands whose full name contains [input] (case-insensitive)
+  /// to [suggestions], skipping an exact match. A command that expects a value
+  /// carries a trailing ":" (mirrors the slot-command helper).
+  void _addMatchingSystemCommands(List<String> suggestions, String input) {
+    final String lower = input.toLowerCase();
+    for (final String command in _getSystemCommands()) {
+      if (lower.isNotEmpty && !command.toLowerCase().contains(lower)) continue;
+      if (command.toLowerCase() == lower) continue;
+      suggestions.add(
+        _systemCommandTakesValue(command) ? '$command:' : command,
+      );
+    }
+  }
+
+  /// True when [commandName] for [slot]'s mode expects a value parameter.
+  /// In the manifest a command lists "parameters" as type strings; a command
+  /// that ignores its value carries a blank entry (e.g. [" "]), while a command
+  /// that needs a value names a type (e.g. ["int "]).
+  bool _commandTakesValue(String slot, String commandName) {
+    try {
+      if (_manifestData.isEmpty || commandName.isEmpty) return false;
+      final String? modeValue = _getModeForSlot(slot);
+      if (modeValue == null || modeValue.isEmpty) return false;
+      if (_manifestData['modes'] is! List) return false;
+
+      for (final dynamic modeItem in _manifestData['modes'] as List<dynamic>) {
+        if (modeItem is! Map<String, dynamic>) continue;
+        if (modeItem['mode']?.toString() != modeValue) continue;
+        if (modeItem['commands'] is! List) return false;
+
+        for (final dynamic command in modeItem['commands'] as List<dynamic>) {
+          if (command is! Map<String, dynamic>) continue;
+          if (command['command']?.toString() != commandName) continue;
+          final dynamic params = command['parameters'];
+          if (params is! List || params.isEmpty) return false;
+          // Any non-blank type means the command expects a value.
+          return params.any((dynamic p) => p.toString().trim().isNotEmpty);
+        }
+        return false;
+      }
+    } catch (_) {
+      // Silent error handling
+    }
+    return false;
+  }
+
+  /// Device-level system commands declared under the SYSTEM chapter's
+  /// "commands" array in the manifest (e.g. "system/getVersion"). These are not
+  /// tied to any slot/mode, so they are offered directly in the serial console.
+  /// Returns the full command names; empty when the manifest has none.
+  List<String> _getSystemCommands() {
+    final List<String> commands = <String>[];
+    try {
+      if (_manifestData['config'] is! List) return commands;
+      for (final dynamic chapter in _manifestData['config'] as List<dynamic>) {
+        if (chapter is! Map<String, dynamic>) continue;
+        if (chapter['chapter']?.toString() != 'SYSTEM') continue;
+        if (chapter['commands'] is! List) return commands;
+        for (final dynamic command in chapter['commands'] as List<dynamic>) {
+          if (command is! Map<String, dynamic>) continue;
+          final String? name = command['command']?.toString();
+          if (name != null && name.isNotEmpty) commands.add(name);
+        }
+        return commands;
+      }
+    } catch (_) {
+      // Silent error handling
+    }
+    return commands;
+  }
+
+  /// True when the system command [commandName] expects a value parameter
+  /// (mirrors [_commandTakesValue] for slot commands).
+  bool _systemCommandTakesValue(String commandName) {
+    try {
+      if (_manifestData['config'] is! List) return false;
+      for (final dynamic chapter in _manifestData['config'] as List<dynamic>) {
+        if (chapter is! Map<String, dynamic>) continue;
+        if (chapter['chapter']?.toString() != 'SYSTEM') continue;
+        if (chapter['commands'] is! List) return false;
+        for (final dynamic command in chapter['commands'] as List<dynamic>) {
+          if (command is! Map<String, dynamic>) continue;
+          if (command['command']?.toString() != commandName) continue;
+          final dynamic params = command['parameters'];
+          if (params is! List || params.isEmpty) return false;
+          return params.any((dynamic p) => p.toString().trim().isNotEmpty);
+        }
+        return false;
+      }
+    } catch (_) {
+      // Silent error handling
+    }
+    return false;
   }
 
   void _refreshEditorDirtyState({String? currentText}) {
@@ -3070,12 +3170,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             tabs: isSerial
                 ? const <Widget>[
                     Tab(text: 'Config edit'),
-                    Tab(text: 'Config desig'),
                     Tab(text: 'Console'),
                   ]
                 : const <Widget>[
                     Tab(text: 'Config edit'),
-                    Tab(text: 'Config desig'),
                   ],
           ),
           const SizedBox(height: 8),
@@ -3085,12 +3183,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               children: isSerial
                   ? <Widget>[
                       _buildConfigEditTab(item),
-                      _buildConfigDesignTab(item),
                       _buildConsoleTab(item),
                     ]
                   : <Widget>[
                       _buildConfigEditTab(item),
-                      _buildConfigDesignTab(item),
                     ],
             ),
           ),
@@ -3099,6 +3195,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+  // Config Design tab was removed from the UI; the builder and its helpers are
+  // kept so the feature can be restored without rebuilding it from scratch.
+  // ignore: unused_element
   Widget _buildConfigDesignTab(DeviceItem item) {
     final bool canSaveDesign = _isConfigDesignDirty && _cachedConfigPath != null;
 
@@ -4374,6 +4473,75 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   /// [defaultWidth]/[defaultHeight] are used when the user has not resized the
   /// popup; once resized, [_suggestionOverlaySize] takes over. The size is
   /// always clamped to [screenSize] so the popup never leaves the main window.
+  /// Footer shown at the bottom of the value-suggestion popup, documenting the
+  /// special crosslink/command values: "@" passes the source event's value
+  /// through to the target, "#" matches/accepts any value.
+  Widget _buildSpecialValueHintFooter() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.blue[50],
+        border: Border(top: BorderSide(color: Colors.blue[100]!)),
+      ),
+      child: Text.rich(
+        TextSpan(
+          style: TextStyle(fontSize: 10, color: Colors.grey[700]),
+          children: <InlineSpan>[
+            const TextSpan(
+              text: '@',
+              style: TextStyle(
+                fontFamily: 'monospace',
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const TextSpan(text: ' — передать значение из события'),
+            TextSpan(
+              text: '       ',
+              style: TextStyle(color: Colors.grey[400]),
+            ),
+            const TextSpan(
+              text: '#',
+              style: TextStyle(
+                fontFamily: 'monospace',
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const TextSpan(text: ' — любое значение'),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// True when [word] (the editor autocomplete context) is a crosslink rule
+  /// whose current step is a value entry — i.e. the user typed ":" after an
+  /// event or a command and is filling in the value. Detected by a ":" in the
+  /// active part (after the last "->", or the whole rule on the source side),
+  /// since the source side keeps reporting [CrossLinkStepType.sourceReport]
+  /// even past the ":".
+  bool _isCrossLinkValueContext(String? word) {
+    if (word == null) return false;
+    final int eq = word.indexOf('=');
+    if (eq < 0 || word.substring(0, eq) != 'crosslink') return false;
+    final String value = word.substring(eq + 1);
+    final int lastComma = value.lastIndexOf(',');
+    final String currentRule =
+        lastComma >= 0 ? value.substring(lastComma + 1).trim() : value;
+    final int arrow = currentRule.lastIndexOf('->');
+    final String activePart =
+        arrow >= 0 ? currentRule.substring(arrow + 2) : currentRule;
+    return activePart.contains(':');
+  }
+
+  /// True when the console input [text] is at a value step ("slot/command:…"),
+  /// where the same special values (@/#) apply.
+  bool _isConsoleValueContext(String text) {
+    final int slashIdx = text.indexOf('/');
+    if (slashIdx < 0) return false;
+    return text.substring(slashIdx + 1).contains(':');
+  }
+
   Widget _buildSuggestionOverlayContent(List<String> suggestions, String currentWord, double popupX, double popupY, double defaultWidth, double defaultHeight, Size screenSize) {
     final double popupWidth = _fitPopupWidth(
         _suggestionOverlaySize?.width ?? defaultWidth, popupX, screenSize);
@@ -4440,6 +4608,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                       },
                     ),
                   ),
+                  if (_isCrossLinkValueContext(currentWord))
+                    _buildSpecialValueHintFooter(),
                 ],
               ),
               // Bottom-right drag handle to resize the popup.
@@ -4845,9 +5015,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           replacementStart = valueStart;
           replacementEnd = end;
         } else if (stepType == CrossLinkStepType.sourceValue) {
-          // Step 3: Add source value after source report with :
-          final String sourcePart = currentRule.split('->')[0];
-          replacementText = existingRules + '$sourcePart:$suggestion';
+          // Step 3: Replace the source value after the report's ":" separator.
+          // The report path itself may contain "/", so split on the colon only.
+          final String sourceBeforeArrow = currentRule.split('->')[0];
+          final int colonIdx = sourceBeforeArrow.indexOf(':');
+          final String reportPart = colonIdx >= 0
+              ? sourceBeforeArrow.substring(0, colonIdx)
+              : sourceBeforeArrow;
+          replacementText = existingRules + '$reportPart:$suggestion';
           replacementStart = valueStart;
           replacementEnd = end;
         } else if (stepType == CrossLinkStepType.targetSlot) {
@@ -4857,17 +5032,23 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           replacementStart = valueStart;
           replacementEnd = end;
         } else if (stepType == CrossLinkStepType.targetCommand) {
-          // Step 5: Add target command after target slot with /
+          // Step 5: Add target command after target slot with /. The suggestion
+          // already ends with ":" when the command expects a value (and not at
+          // all when it doesn't), so splice it in verbatim — valueless commands
+          // finish the rule, value commands end ready for the value.
           final String targetSlot = _extractTargetSlotFromCrossLink(currentRule);
           final String sourcePart = currentRule.split('->')[0];
-          replacementText = existingRules + '$sourcePart->$targetSlot/$suggestion' + ':';
+          replacementText = existingRules + '$sourcePart->$targetSlot/$suggestion';
           replacementStart = valueStart;
           replacementEnd = end;
         } else if (stepType == CrossLinkStepType.targetValue) {
-          // Step 6: Add target value after target command with =
-          final String targetPart = currentRule.split('->')[1];
+          // Step 6: Add target value after the command's ":" separator.
           final String sourcePart = currentRule.split('->')[0];
-          replacementText = existingRules + '$sourcePart->$targetPart=$suggestion';
+          final String targetPart = currentRule.split('->')[1];
+          final int colonIdx = targetPart.indexOf(':');
+          final String commandPart =
+              colonIdx >= 0 ? targetPart.substring(0, colonIdx) : targetPart;
+          replacementText = existingRules + '$sourcePart->$commandPart:$suggestion';
           replacementStart = valueStart;
           replacementEnd = end;
         }
@@ -4937,7 +5118,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   String _getSuggestionContext(String suggestion) {
     final String? currentWord = _currentWord;
 
-    if (suggestion.startsWith('[') && suggestion.endsWith(']')) {
+    if (suggestion == '@') {
+      return 'Спецзначение: передать значение из события';
+    } else if (suggestion == '#') {
+      return 'Спецзначение: любое значение';
+    } else if (suggestion.startsWith('[') && suggestion.endsWith(']')) {
       return 'Configuration section/chapter';
     } else if (suggestion.startsWith('mode=')) {
       // Extract mode value and get description from manifest
@@ -4945,7 +5130,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       final String? description = _getModeDescriptionFromManifest(modeValue);
       return description ?? 'Mode from manifest modes array';
     } else if (currentWord != null && (currentWord == 'crosslink' || currentWord.startsWith('crosslink='))) {
-      final String crossLinkValue = currentWord == 'crosslink' ? '' : currentWord.substring(10); // Remove 'crosslink=' prefix
+      final String rawCrossLinkValue = currentWord == 'crosslink' ? '' : currentWord.substring(10); // Remove 'crosslink=' prefix
+      // crosslink= holds comma-separated rules; the helper edits the last one,
+      // so parse only the rule after the final comma (as the suggestion builder
+      // does) — otherwise an earlier rule's "->" misreads the step.
+      final int lastComma = rawCrossLinkValue.lastIndexOf(',');
+      final String crossLinkValue =
+          lastComma >= 0 ? rawCrossLinkValue.substring(lastComma + 1).trim() : rawCrossLinkValue;
       final CrossLinkStepType stepType = _parseCrossLinkStep(crossLinkValue, logEnabled: false);
 
       if (stepType == CrossLinkStepType.sourceSlot || stepType == CrossLinkStepType.targetSlot) {
@@ -4954,7 +5145,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           return description;
         }
         return 'Slot from manifest';
-      } else if (stepType == CrossLinkStepType.sourceReport) {
+      } else if (stepType == CrossLinkStepType.sourceReport ||
+          stepType == CrossLinkStepType.sourceValue) {
+        // The report step lists events; the value step keeps those same events
+        // visible as context — both resolve the suggestion's report description.
         if (suggestion.isEmpty) {
           return 'Source report';
         }
@@ -4964,18 +5158,24 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           return description;
         }
         return 'Source report from manifest';
-      } else if (stepType == CrossLinkStepType.targetCommand) {
+      } else if (stepType == CrossLinkStepType.targetCommand ||
+          stepType == CrossLinkStepType.targetValue) {
+        // The command step lists commands; the value step keeps those same
+        // commands visible as context — both resolve the command description.
         if (suggestion.isEmpty) {
           return 'Target command';
         }
         final String targetSlot = _extractTargetSlotFromCrossLink(crossLinkValue);
-        final String? description = _getTargetCommandDescriptionFromManifest(targetSlot, suggestion);
+        // Value commands carry a trailing ":" — strip it for the manifest lookup.
+        final String commandName =
+            suggestion.endsWith(':') ? suggestion.substring(0, suggestion.length - 1) : suggestion;
+        final String? description = _getTargetCommandDescriptionFromManifest(targetSlot, commandName);
         if (description != null && description.isNotEmpty) {
           return description;
         }
         return 'Target command from manifest';
       }
-      // For other crosslink steps (e.g., values), fall through to default handling
+      // For other crosslink steps, fall through to default handling
       return 'Cross link value';
     } else if (suggestion.contains(':') && !suggestion.startsWith('SLOT_')) {
       // This might be an option suggestion (format: "name:value")
@@ -5504,13 +5704,19 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                         }
                       }
                     } else {
-                      // For other types, use valueDefault
+                      // Other types (string/int/float): seed the value with the
+                      // manifest default when there is one, otherwise offer the
+                      // bare "name:" so the option is still suggested and ready
+                      // for the user to type a value (e.g. whitelist/filename,
+                      // which has an empty default).
                       final String? valueDefault = option['valueDefault']?.toString();
-                      if (valueDefault != null && valueDefault.isNotEmpty && valueDefault != 'null') {
-                        final String option = '$name:$valueDefault';
-                        optionSuggestions.add(option);
-                        _log('DEBUG: Added option: $option');
-                      }
+                      final bool hasDefault = valueDefault != null &&
+                          valueDefault.isNotEmpty &&
+                          valueDefault != 'null';
+                      final String optionSuggestion =
+                          hasDefault ? '$name:$valueDefault' : '$name:';
+                      optionSuggestions.add(optionSuggestion);
+                      _log('DEBUG: Added option: $optionSuggestion');
                     }
                   }
                 }
@@ -5874,7 +6080,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     final Offset focusPosition = focusBox.localToGlobal(Offset.zero);
     final double popupWidth = 300.0;
-    final double popupHeight = (suggestions.length * 40.0).clamp(80.0, 300.0);
+    final bool showValueHint = _isConsoleValueContext(currentWord);
+    final double popupHeight =
+        (suggestions.length * 40.0).clamp(80.0, 300.0) +
+            (showValueHint ? 30.0 : 0.0);
     const double gap = 4.0;
 
     _consoleSuggestionOverlay = OverlayEntry(
@@ -5902,26 +6111,34 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: Colors.grey[300]!),
               ),
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: suggestions.length,
-                itemBuilder: (context, index) {
-                  final bool isSelected = index == _consoleSelectedSuggestionIndex;
-                  final String suggestion = suggestions[index];
-                  return ListTile(
-                    dense: true,
-                    selected: isSelected,
-                    title: Text(
-                      suggestion,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                      ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Flexible(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: suggestions.length,
+                      itemBuilder: (context, index) {
+                        final bool isSelected = index == _consoleSelectedSuggestionIndex;
+                        final String suggestion = suggestions[index];
+                        return ListTile(
+                          dense: true,
+                          selected: isSelected,
+                          title: Text(
+                            suggestion,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                            ),
+                          ),
+                          onTap: () => _selectConsoleSuggestion(suggestion, currentWord),
+                          hoverColor: Colors.blue[50],
+                        );
+                      },
                     ),
-                    onTap: () => _selectConsoleSuggestion(suggestion, currentWord),
-                    hoverColor: Colors.blue[50],
-                  );
-                },
+                  ),
+                  if (showValueHint) _buildSpecialValueHintFooter(),
+                ],
               ),
             ),
           ),
@@ -5956,39 +6173,45 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _consoleSelectedSuggestionIndex = -1;
   }
 
-  /// Select a console suggestion
+  /// Select a console suggestion. Mirrors the first-delimiter parsing used in
+  /// [_getConsoleCrossLinkSuggestions]. A command suggestion already carries a
+  /// trailing ":" when it takes a value, so the command branch just splices it
+  /// in verbatim — value commands end ready for input, plain ones complete.
   void _selectConsoleSuggestion(String suggestion, String currentWord) {
     final String text = _consoleInputController.text;
-    
-    String newText = text;
-    
-    // Determine where to insert based on the pattern
-    if (text.contains('/')) {
-      final List<String> parts = text.split('/');
-      if (parts.length >= 2) {
-        final String slotPart = parts[0];
-        final String afterSlash = parts[1];
-        
-        if (afterSlash.contains(':')) {
-          // Pattern: "slot/command:" -> replace value part
-          final List<String> valueParts = afterSlash.split(':');
-          final String commandPart = valueParts[0];
-          newText = '$slotPart/$commandPart:$suggestion';
-        } else {
-          // Pattern: "slot/" -> replace command part
-          newText = '$slotPart/$suggestion';
-        }
+    String newText;
+
+    // System commands are absolute, full names ("system/getVersion[:]"), so they
+    // replace the whole input rather than being spliced onto a slot prefix.
+    final String bareSuggestion =
+        suggestion.endsWith(':') ? suggestion.substring(0, suggestion.length - 1) : suggestion;
+    final bool isSystemCommand = _getSystemCommands().contains(bareSuggestion);
+
+    final int slashIdx = text.indexOf('/');
+    if (isSystemCommand) {
+      newText = suggestion;
+    } else if (slashIdx >= 0) {
+      final String slotPart = text.substring(0, slashIdx);
+      final String afterSlash = text.substring(slashIdx + 1);
+      final int colonIdx = afterSlash.indexOf(':');
+      if (colonIdx >= 0) {
+        // Pattern: "slot/command:" -> fill in the value part.
+        final String commandPart = afterSlash.substring(0, colonIdx);
+        newText = '$slotPart/$commandPart:$suggestion';
+      } else {
+        // Pattern: "slot/" -> insert the command.
+        newText = '$slotPart/$suggestion';
       }
     } else {
-      // Pattern: just text -> replace with slot
+      // Pattern: bare text -> the slot name.
       newText = suggestion;
     }
-    
+
     _consoleInputController.value = _consoleInputController.value.copyWith(
       text: newText,
       selection: TextSelection.collapsed(offset: newText.length),
     );
-    
+
     _hideConsoleSuggestionOverlay();
     Future.microtask(() {
       _consoleInputFocusNode.requestFocus();
@@ -5998,6 +6221,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   /// Handle keyboard events for console input suggestions
   KeyEventResult _handleConsoleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is KeyDownEvent) {
+      // Ctrl+Space - summon the command helper popup.
+      if (event.logicalKey == LogicalKeyboardKey.space &&
+          HardwareKeyboard.instance.isControlPressed) {
+        _consoleAutocompleteTimer?.cancel();
+        _refreshConsoleSuggestions(_consoleInputController.text);
+        return KeyEventResult.handled;
+      }
+
       // Handle command history navigation (only when suggestion overlay is not visible)
       if (_consoleSuggestionOverlay == null) {
         if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
@@ -6102,6 +6333,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         const SizedBox(height: 8),
         // Input row at bottom
         Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
             if (_consoleDeviceName != null)
               Padding(
@@ -6144,6 +6376,34 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
               child: const Text('Clear'),
             ),
           ],
+        ),
+        const SizedBox(height: 6),
+        // Usage hint, styled like the config editor status bar.
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.blue[50],
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.blue[200]!),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Icon(Icons.auto_awesome, size: 12, color: Colors.blue[600]),
+                const SizedBox(width: 6),
+                Text(
+                  'История команд: ↑ / ↓        Подсказки: Ctrl + Space',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.blue[700],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ],
     );
@@ -7348,6 +7608,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return buffer.toString();
   }
 
+  // Kept alongside the removed Config Design tab (see _buildConfigDesignTab).
+  // ignore: unused_element
   void _syncEditorFromParsedConfig() {
     final String configContent = _buildConfigContentFromParsedConfig();
     if (_configEditorController.text == configContent) {
@@ -8267,14 +8529,26 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             final String? modeName = modeItem['mode']?.toString();
 
             if (modeName == mode) {
-              // A mode may expose a trigger topic, an action topic, or both
-              // (e.g. in_out has trigger "in_<n>" and action "out_<n>").
+              // Manifest 3.57+ exposes the slot topic prefix in the mode-level
+              // `trigger` (reports / source side) and `action` (commands /
+              // target side) fields (e.g. in_out has trigger "in_<n>" and
+              // action "out_<n>").
               for (final String field in const <String>['trigger', 'action']) {
                 final String? topic = _topicFromManifestField(
                     modeItem[field]?.toString(), slotNumber);
                 if (topic != null && !topicDefaults.contains(topic)) {
                   topicDefaults.add(topic);
                 }
+              }
+
+              // Manifest 3.56 and earlier have no trigger/action fields; the
+              // topic prefix lives in a mode option whose name contains "topic"
+              // (its `valueDefault` holds the prefix). Fall back to that so
+              // older devices still resolve their source/target slots — without
+              // it the cross-link and console helpers list nothing.
+              if (topicDefaults.isEmpty && modeItem['options'] is List) {
+                _addLegacyTopicDefaults(
+                    modeItem['options'] as List<dynamic>, slotNumber, topicDefaults);
               }
               break; // Found the mode, no need to continue
             }
@@ -8285,6 +8559,41 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       // Silent error handling during build
     }
     return topicDefaults;
+  }
+
+  /// Legacy (manifest ≤3.56) topic resolution: pull the slot prefix from a mode
+  /// option whose name contains "topic" (its `valueDefault` holds the prefix)
+  /// and normalise the trailing slot number to [slotNumber]. Appends the
+  /// resolved topics to [topicDefaults].
+  void _addLegacyTopicDefaults(
+      List<dynamic> modeOptions, String slotNumber, List<String> topicDefaults) {
+    for (final dynamic option in modeOptions) {
+      if (option is! Map<String, dynamic>) continue;
+      final String? name = option['name']?.toString();
+      final String? defaultValue = option['valueDefault']?.toString();
+      if (name == null || !name.toLowerCase().contains('topic')) continue;
+      if (defaultValue == null || defaultValue.isEmpty || defaultValue == 'null') {
+        continue;
+      }
+
+      // Clean up the default value (keep alphanumerics, underscore, hyphen).
+      String cleanValue = defaultValue
+          .replaceAll(RegExp(r'^/+'), '') // Remove leading forward slashes
+          .replaceAll(RegExp(r'[^\w\-]'), '_') // Replace problematic chars
+          .replaceAll(RegExp(r'^_+'), '') // Remove leading underscores
+          .replaceAll(RegExp(r'_+$'), '') // Remove trailing underscores
+          .replaceAll(RegExp(r'_+'), '_'); // Collapse repeated underscores
+
+      // Normalise the trailing slot number to this slot (replace an existing
+      // "_<num>" suffix, or append one when absent).
+      cleanValue = _hasUnderscoreAndNumberAtEnd(cleanValue)
+          ? cleanValue.replaceAll(RegExp(r'_\d+$'), '_$slotNumber')
+          : '${cleanValue}_$slotNumber';
+
+      if (cleanValue.isNotEmpty && !topicDefaults.contains(cleanValue)) {
+        topicDefaults.add(cleanValue);
+      }
+    }
   }
 
   /// Convert a manifest `trigger`/`action` value such as `"deviceName/out_<n>"`
@@ -8366,13 +8675,21 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           _log('DEBUG: Source slot extracted: "$sourceSlot"');
           final List<String> reports = _getReportTopicsForSourceSlot(sourceSlot);
           _log('DEBUG: Found ${reports.length} reports for source slot "$sourceSlot"');
-          final String filterText = _extractFilterTextAfterSlash(crossLinkValue);
+          String filterText = _extractFilterTextAfterSlash(crossLinkValue);
+          // Once the ":" value separator is typed the user is filling in the
+          // trigger value, not picking a report — drop the value part from the
+          // filter so the chosen event (and its siblings) stay listed as
+          // context while the @/# footer explains the special values.
+          final int colonIdx = filterText.indexOf(':');
+          final bool valueEntry = colonIdx >= 0;
+          if (valueEntry) filterText = filterText.substring(0, colonIdx);
           _log('DEBUG: Filter text after slash: "$filterText"');
-          
+
           for (final String report in reports) {
             if (report.isNotEmpty && (filterText.isEmpty || report.toLowerCase().contains(filterText.toLowerCase()))) {
-              // Don't suggest if it exactly matches what's already typed
-              if (filterText.isEmpty || report.toLowerCase() != filterText.toLowerCase()) {
+              // Before the value is being entered, skip an exact match (it is
+              // already typed); while entering the value keep the whole list.
+              if (valueEntry || filterText.isEmpty || report.toLowerCase() != filterText.toLowerCase()) {
                 suggestions.add(report);
                 _log('DEBUG: Added source report suggestion: "$report"');
               }
@@ -8386,7 +8703,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           final String sourceSlot = _extractSourceSlotFromCrossLink(crossLinkValue);
           final List<String> topicValues = _getTopicValuesFromSlotSilent(sourceSlot);
           final String currentValue = _extractCurrentValueFromCrossLink(crossLinkValue);
-          
+
           for (final String value in topicValues) {
             // Don't suggest if it exactly matches what's already typed
             if (value.toLowerCase() != currentValue.toLowerCase()) {
@@ -8411,31 +8728,43 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           break;
           
         case CrossLinkStepType.targetCommand:
-          // Step 5: Show target commands
+          // Step 5: Show target commands. Commands that expect a value carry a
+          // trailing ":" so the user can tell them apart from valueless ones
+          // (mirrors the serial console helper).
           final String targetSlot = _extractTargetSlotFromCrossLink(crossLinkValue);
           final List<String> commands = _getTargetCommandsForSlot(targetSlot);
           final String currentCommand = _extractCurrentCommandFromCrossLink(crossLinkValue);
-          
-          for (final String command in commands) {
-            if (command.isNotEmpty) {
-              // Don't suggest if it exactly matches what's already typed
-              if (command.toLowerCase() != currentCommand.toLowerCase()) {
-                suggestions.add(command);
+
+          // A valueless command stays in this step once chosen; when the typed
+          // command exactly matches a known one the rule is complete, so offer
+          // nothing rather than re-listing every command.
+          final bool commandComplete = currentCommand.isNotEmpty &&
+              commands.any((String c) =>
+                  c.isNotEmpty && c.toLowerCase() == currentCommand.toLowerCase());
+          if (!commandComplete) {
+            for (final String command in commands) {
+              if (command.isNotEmpty) {
+                // Filter by what's typed; skip an exact match.
+                if (command.toLowerCase().contains(currentCommand.toLowerCase()) &&
+                    command.toLowerCase() != currentCommand.toLowerCase()) {
+                  suggestions.add(
+                    _commandTakesValue(targetSlot, command) ? '$command:' : command,
+                  );
+                }
               }
             }
           }
           break;
           
         case CrossLinkStepType.targetValue:
-          // Step 6: Show target values (topic variables from target slot)
+          // Step 6: the command already carries its ":" and the user is filling
+          // in the value. Keep the command list visible as context (mirrors the
+          // source side keeping events listed); the @/# footer explains the
+          // special values, and concrete values are typed in directly.
           final String targetSlot = _extractTargetSlotFromCrossLink(crossLinkValue);
-          final List<String> topicValues = _getTopicValuesFromSlotSilent(targetSlot);
-          final String currentTargetValue = _extractCurrentTargetValueFromCrossLink(crossLinkValue);
-          
-          for (final String value in topicValues) {
-            // Don't suggest if it exactly matches what's already typed
-            if (value.toLowerCase() != currentTargetValue.toLowerCase()) {
-              suggestions.add(value);
+          for (final String command in _getTargetCommandsForSlot(targetSlot)) {
+            if (command.isNotEmpty) {
+              suggestions.add(command);
             }
           }
           break;
@@ -8458,7 +8787,11 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       return CrossLinkStepType.sourceSlot;
     }
     
-    // Check if we have source slot and looking for source report
+    // Source side (no "->" yet). The report itself contains "/" (e.g.
+    // "event/endOfTrack"), so we keep listing reports here — including after
+    // the ":" value separator, so the chosen event stays visible while the
+    // user fills in the trigger value (the special @/# values live in the
+    // popup footer rather than as list items).
     if (crossLinkValue.contains('/') && !crossLinkValue.contains('->')) {
       if (logEnabled) {
         _log('DEBUG: Found / without ->, returning sourceReport');
@@ -8489,12 +8822,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         return CrossLinkStepType.targetSlot;
       } else if (parts.length == 2) {
         final String targetPart = parts[1];
+        // Command names themselves contain "/" (e.g. "action/enable"), so the
+        // "/" can't tell command from value — only the ":" separator can.
         if (targetPart.isEmpty) {
           return CrossLinkStepType.targetSlot;
-        } else if (!targetPart.contains('/')) {
-          return CrossLinkStepType.targetCommand;
-        } else {
+        } else if (targetPart.contains(':') || targetPart.contains('=')) {
+          // "slot/command:" — the command took its value separator, offer values.
           return CrossLinkStepType.targetValue;
+        } else {
+          // "slot" or "slot/command" with no separator yet — selecting the
+          // command (a valueless command leaves the rule complete here).
+          return CrossLinkStepType.targetCommand;
         }
       }
     }
@@ -8568,35 +8906,21 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     return '';
   }
 
-  /// Extract current command from cross link (for target command filtering)
+  /// Extract current command from cross link (for target command filtering).
+  /// Commands are multi-segment (e.g. "action/enable"), so take the whole path
+  /// after the slot, and stop at the value separator if present.
   String _extractCurrentCommandFromCrossLink(String crossLinkValue) {
     if (crossLinkValue.contains('->')) {
       final List<String> parts = crossLinkValue.split('->');
       if (parts.length >= 2) {
-        final String targetPart = parts[1];
-        if (targetPart.contains('/')) {
-          final List<String> targetParts = targetPart.split('/');
-          if (targetParts.length >= 2) {
-            return targetParts[1];
-          }
+        String targetPart = parts[1];
+        final int colonIdx = targetPart.indexOf(':');
+        if (colonIdx >= 0) {
+          targetPart = targetPart.substring(0, colonIdx);
         }
-        return targetPart;
-      }
-    }
-    return '';
-  }
-
-  /// Extract current target value from cross link (for target value filtering)
-  String _extractCurrentTargetValueFromCrossLink(String crossLinkValue) {
-    if (crossLinkValue.contains('->')) {
-      final List<String> parts = crossLinkValue.split('->');
-      if (parts.length >= 2) {
-        final String targetPart = parts[1];
-        if (targetPart.contains('=')) {
-          final List<String> targetParts = targetPart.split('=');
-          if (targetParts.length >= 2) {
-            return targetParts[1];
-          }
+        final int slashIdx = targetPart.indexOf('/');
+        if (slashIdx >= 0) {
+          return targetPart.substring(slashIdx + 1);
         }
       }
     }
