@@ -1902,10 +1902,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   /// Compute console suggestions for [currentText] and show/refresh the popup.
-  /// Hides the popup when there is nothing to suggest.
+  /// Hides the popup when there is nothing to suggest. At the value step
+  /// ("slot/command:…") the list is empty, but the popup still opens to show
+  /// the command's manifest description as a footer, so keep it visible then.
   void _refreshConsoleSuggestions(String currentText) {
     final List<String> suggestions = _getConsoleCrossLinkSuggestions(currentText);
-    if (suggestions.isEmpty) {
+    final String? commandDescription =
+        _isConsoleValueContext(currentText) ? _getConsoleCommandDescription(currentText) : null;
+    if (suggestions.isEmpty &&
+        (commandDescription == null || commandDescription.isEmpty)) {
       _hideConsoleSuggestionOverlay();
       return;
     }
@@ -1944,14 +1949,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       final int colonIdx = afterSlash.indexOf(':');
 
       if (colonIdx >= 0) {
-        // Pattern 3: "slot/command:" -> the user is filling in the value. Keep
-        // the command list visible as context (the @/# footer explains the
-        // special values; concrete values are typed in directly).
-        for (final String command in _getTargetCommandsForSlot(slotPart)) {
-          if (command.isNotEmpty) {
-            suggestions.add(command);
-          }
-        }
+        // Pattern 3: "slot/command:" -> the user is filling in the value. A
+        // direct console command takes a literal value (the crosslink @/#
+        // special values don't apply here), so list nothing; the overlay
+        // instead surfaces the command's manifest description as a footer.
       } else {
         // Pattern 2: "slot/command" -> show commands. Append ":" to commands
         // that expect a value so the user can tell them apart from plain ones.
@@ -2079,6 +2080,83 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       // Silent error handling
     }
     return false;
+  }
+
+  /// Manifest description for a device-level system command (declared under the
+  /// SYSTEM chapter's "commands" array). Null when the manifest has none.
+  String? _getSystemCommandDescriptionFromManifest(String commandName) {
+    try {
+      if (_manifestData['config'] is! List) return null;
+      for (final dynamic chapter in _manifestData['config'] as List<dynamic>) {
+        if (chapter is! Map<String, dynamic>) continue;
+        if (chapter['chapter']?.toString() != 'SYSTEM') continue;
+        if (chapter['commands'] is! List) return null;
+        for (final dynamic command in chapter['commands'] as List<dynamic>) {
+          if (command is! Map<String, dynamic>) continue;
+          if (command['command']?.toString() != commandName) continue;
+          final String? description = command['description']?.toString();
+          if (description != null && description.isNotEmpty) {
+            return _normalizeDescription(description);
+          }
+          return null;
+        }
+        return null;
+      }
+    } catch (_) {
+      // Silent error handling
+    }
+    return null;
+  }
+
+  /// Description shown under a single console suggestion. Resolves the manifest
+  /// text for the suggestion in its current context: a system command, a slot
+  /// command (when the input already names a "slot/"), or a bare slot name.
+  /// Returns an empty string when the manifest knows nothing.
+  String _getConsoleSuggestionDescription(String suggestion, String currentWord) {
+    final String bare = suggestion.endsWith(':')
+        ? suggestion.substring(0, suggestion.length - 1)
+        : suggestion;
+    if (_getSystemCommands().contains(bare)) {
+      return _getSystemCommandDescriptionFromManifest(bare) ?? '';
+    }
+    final int slashIdx = currentWord.indexOf('/');
+    if (slashIdx >= 0) {
+      // "slot/…" — the suggestion is a command for that slot.
+      final String slotPart = currentWord.substring(0, slashIdx);
+      return _getTargetCommandDescriptionFromManifest(slotPart, bare) ?? '';
+    }
+    // Bare prompt — the suggestion is a slot name; show its mode description.
+    return _getModeDescriptionForSlot(suggestion) ?? '';
+  }
+
+  /// Manifest description for the command the console input is currently filling
+  /// a value for ("slot/command:…"). Handles both slot commands and device-level
+  /// system commands. Null when there is no command or no manifest text.
+  String? _getConsoleCommandDescription(String currentWord) {
+    final int slashIdx = currentWord.indexOf('/');
+    if (slashIdx < 0) return null;
+    final String slotPart = currentWord.substring(0, slashIdx);
+    final String afterSlash = currentWord.substring(slashIdx + 1);
+    final int colonIdx = afterSlash.indexOf(':');
+    final String commandName =
+        colonIdx >= 0 ? afterSlash.substring(0, colonIdx) : afterSlash;
+    if (commandName.isEmpty) return null;
+
+    final String fullName = '$slotPart/$commandName';
+    if (_getSystemCommands().contains(fullName)) {
+      return _getSystemCommandDescriptionFromManifest(fullName);
+    }
+    return _getTargetCommandDescriptionFromManifest(slotPart, commandName);
+  }
+
+  /// The command name from console input being filled with a value
+  /// ("slot/command:…" -> "command"). Empty when there is none.
+  String _consoleCommandName(String currentWord) {
+    final int slashIdx = currentWord.indexOf('/');
+    if (slashIdx < 0) return '';
+    final String afterSlash = currentWord.substring(slashIdx + 1);
+    final int colonIdx = afterSlash.indexOf(':');
+    return colonIdx >= 0 ? afterSlash.substring(0, colonIdx) : afterSlash;
   }
 
   void _refreshEditorDirtyState({String? currentText}) {
@@ -4514,6 +4592,41 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     );
   }
 
+  /// Footer for the console value step: shows the command whose value is being
+  /// typed plus its manifest description (the crosslink @/# special values do
+  /// not apply to a direct console command, so this replaces that hint).
+  Widget _buildConsoleCommandDescriptionFooter(String command, String description) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.blue[50],
+        border: Border(top: BorderSide(color: Colors.blue[100]!)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            command,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: Colors.blue[800],
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            description,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 10, color: Colors.grey[700]),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// True when [word] (the editor autocomplete context) is a crosslink rule
   /// whose current step is a value entry — i.e. the user typed ":" after an
   /// event or a command and is filling in the value. Detected by a ":" in the
@@ -5881,6 +5994,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   Timer? _consoleTimer;
   final StringBuffer _consoleBuffer = StringBuffer();
   final ScrollController _consoleScrollController = ScrollController();
+  // Scrolls the console suggestion popup so the keyboard-selected row stays
+  // visible (mirrors _suggestionScrollController for the editor popup).
+  final ScrollController _consoleSuggestionScrollController = ScrollController();
 
   Future<void> _startSerialConsole(String portName) async {
     await _stopSerialConsole();
@@ -6029,6 +6145,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     _stopSerialConsole();
     _saveConsoleHistory();
     _consoleScrollController.dispose();
+    _consoleSuggestionScrollController.dispose();
     _suggestionScrollController.dispose();
     _textEditorScrollController.dispose();
     _configEditorController.dispose();
@@ -6088,11 +6205,23 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     if (focusBox == null) return;
 
     final Offset focusPosition = focusBox.localToGlobal(Offset.zero);
-    final double popupWidth = 300.0;
-    final bool showValueHint = _isConsoleValueContext(currentWord);
-    final double popupHeight =
-        (suggestions.length * 40.0).clamp(80.0, 300.0) +
-            (showValueHint ? 30.0 : 0.0);
+    final double popupWidth = 320.0;
+    const double rowHeight = 52.0;
+    // At the value step ("slot/command:…") the list is empty and the footer
+    // shows the current command plus its manifest description; otherwise list
+    // the suggestions, each with a description subtitle (uniform row height so
+    // the keyboard scroll-into-view math stays exact).
+    final bool valueContext = _isConsoleValueContext(currentWord);
+    final String commandName = valueContext ? _consoleCommandName(currentWord) : '';
+    final String? commandDescription =
+        valueContext ? _getConsoleCommandDescription(currentWord) : null;
+    final bool showCommandFooter = commandName.isNotEmpty &&
+        commandDescription != null &&
+        commandDescription.isNotEmpty;
+    final double listHeight = suggestions.isEmpty
+        ? 0.0
+        : (suggestions.length * rowHeight).clamp(rowHeight, 300.0);
+    final double popupHeight = listHeight + (showCommandFooter ? 64.0 : 0.0);
     const double gap = 4.0;
 
     _consoleSuggestionOverlay = OverlayEntry(
@@ -6125,11 +6254,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                 children: <Widget>[
                   Flexible(
                     child: ListView.builder(
+                      controller: _consoleSuggestionScrollController,
                       shrinkWrap: true,
+                      itemExtent: rowHeight,
                       itemCount: suggestions.length,
                       itemBuilder: (context, index) {
                         final bool isSelected = index == _consoleSelectedSuggestionIndex;
                         final String suggestion = suggestions[index];
+                        final String description =
+                            _getConsoleSuggestionDescription(suggestion, currentWord);
                         return ListTile(
                           dense: true,
                           selected: isSelected,
@@ -6140,13 +6273,25 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
                               fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                             ),
                           ),
+                          subtitle: description.isEmpty
+                              ? null
+                              : Text(
+                                  description,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.grey[600],
+                                  ),
+                                ),
                           onTap: () => _selectConsoleSuggestion(suggestion, currentWord),
                           hoverColor: Colors.blue[50],
                         );
                       },
                     ),
                   ),
-                  if (showValueHint) _buildSpecialValueHintFooter(),
+                  if (showCommandFooter)
+                    _buildConsoleCommandDescriptionFooter(commandName, commandDescription),
                 ],
               ),
             ),
@@ -6180,6 +6325,40 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       _consoleSuggestionOverlay = null;
     }
     _consoleSelectedSuggestionIndex = -1;
+  }
+
+  /// Scroll the console suggestion popup so the keyboard-selected row is
+  /// visible (rows have a uniform extent, so offset = index * rowHeight).
+  void _scrollToSelectedConsoleSuggestion() {
+    if (_consoleSelectedSuggestionIndex < 0 ||
+        _consoleSuggestions.isEmpty ||
+        !_consoleSuggestionScrollController.hasClients) {
+      return;
+    }
+    const double rowHeight = 52.0;
+    final double targetOffset = _consoleSelectedSuggestionIndex * rowHeight;
+    final double viewport =
+        _consoleSuggestionScrollController.position.viewportDimension;
+    final double maxScroll =
+        _consoleSuggestionScrollController.position.maxScrollExtent;
+    final double current = _consoleSuggestionScrollController.offset;
+
+    double offset = current;
+    if (targetOffset < current) {
+      // Selected row is above the viewport — bring it to the top.
+      offset = targetOffset;
+    } else if (targetOffset + rowHeight > current + viewport) {
+      // Selected row is below the viewport — bring it to the bottom.
+      offset = targetOffset + rowHeight - viewport;
+    }
+    offset = offset.clamp(0.0, maxScroll);
+    if (offset != current) {
+      _consoleSuggestionScrollController.animateTo(
+        offset,
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeInOut,
+      );
+    }
   }
 
   /// Select a console suggestion. Mirrors the first-delimiter parsing used in
@@ -6223,7 +6402,13 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
     _hideConsoleSuggestionOverlay();
     Future.microtask(() {
+      if (!mounted) return;
       _consoleInputFocusNode.requestFocus();
+      // A command that takes a value ends with ":"; re-open the popup so its
+      // manifest description footer guides the value being typed next.
+      if (newText.endsWith(':')) {
+        _refreshConsoleSuggestions(newText);
+      }
     });
   }
 
@@ -6273,6 +6458,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         if (_consoleSuggestionOverlay != null) {
           _consoleSuggestionOverlay!.markNeedsBuild();
         }
+        _scrollToSelectedConsoleSuggestion();
         return KeyEventResult.handled;
       } else if (event.logicalKey == LogicalKeyboardKey.arrowUp && 
                  _consoleSuggestionOverlay != null && 
@@ -6285,6 +6471,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
         if (_consoleSuggestionOverlay != null) {
           _consoleSuggestionOverlay!.markNeedsBuild();
         }
+        _scrollToSelectedConsoleSuggestion();
         return KeyEventResult.handled;
       } else if (_consoleSuggestionOverlay != null &&
                  (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
