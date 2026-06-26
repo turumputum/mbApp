@@ -1866,6 +1866,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   void _handleDetailsTabChangeSerial() {
+    // Switching between Config edit and Console must dismiss any open
+    // autocomplete popups (editor or console), or they linger over the new tab.
+    _hideSuggestionOverlay();
+    _hideConsoleSuggestionOverlay();
     if (!_detailsTabControllerSerial.indexIsChanging &&
         _detailsTabControllerSerial.index != _currentDetailsTabIndex) {
       _currentDetailsTabIndex = _detailsTabControllerSerial.index;
@@ -1876,6 +1880,8 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   void _handleDetailsTabChangeMdns() {
+    _hideSuggestionOverlay();
+    _hideConsoleSuggestionOverlay();
     if (!_detailsTabControllerMdns.indexIsChanging &&
         _detailsTabControllerMdns.index != _currentDetailsTabIndex) {
       // Only the Config edit tab remains for mDNS devices.
@@ -1902,13 +1908,14 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   /// Compute console suggestions for [currentText] and show/refresh the popup.
-  /// Hides the popup when there is nothing to suggest. At the value step
-  /// ("slot/command:…") the list is empty, but the popup still opens to show
-  /// the command's manifest description as a footer, so keep it visible then.
+  /// Hides the popup when there is nothing to suggest. Once a complete command
+  /// is typed (with or without a trailing ":") the suggestion list is empty,
+  /// but the popup still opens to show that command's manifest description as a
+  /// footer — [_getConsoleCommandDescription] returns non-null only for an exact
+  /// command match, so it doubles as the "command fully typed" signal.
   void _refreshConsoleSuggestions(String currentText) {
     final List<String> suggestions = _getConsoleCrossLinkSuggestions(currentText);
-    final String? commandDescription =
-        _isConsoleValueContext(currentText) ? _getConsoleCommandDescription(currentText) : null;
+    final String? commandDescription = _getConsoleCommandDescription(currentText);
     if (suggestions.isEmpty &&
         (commandDescription == null || commandDescription.isEmpty)) {
       _hideConsoleSuggestionOverlay();
@@ -6173,8 +6180,12 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   /// Show console suggestion overlay
   void _showConsoleSuggestionOverlay(List<String> suggestions, String currentWord) {
     _hideConsoleSuggestionOverlay();
-    
-    if (suggestions.isEmpty) return;
+
+    // Keep the popup alive with an empty list when a complete command's
+    // description footer is available (the footer is the only content then).
+    final String? footerDescription = _getConsoleCommandDescription(currentWord);
+    final bool hasFooter = footerDescription != null && footerDescription.isNotEmpty;
+    if (suggestions.isEmpty && !hasFooter) return;
     if (!mounted) return;
     
     // Wait for next frame to ensure widget tree is ready
@@ -6207,17 +6218,15 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     final Offset focusPosition = focusBox.localToGlobal(Offset.zero);
     final double popupWidth = 320.0;
     const double rowHeight = 52.0;
-    // At the value step ("slot/command:…") the list is empty and the footer
-    // shows the current command plus its manifest description; otherwise list
-    // the suggestions, each with a description subtitle (uniform row height so
-    // the keyboard scroll-into-view math stays exact).
-    final bool valueContext = _isConsoleValueContext(currentWord);
-    final String commandName = valueContext ? _consoleCommandName(currentWord) : '';
-    final String? commandDescription =
-        valueContext ? _getConsoleCommandDescription(currentWord) : null;
-    final bool showCommandFooter = commandName.isNotEmpty &&
-        commandDescription != null &&
-        commandDescription.isNotEmpty;
+    // When a complete command is typed ("slot/command" or "slot/command:…") the
+    // footer shows that command plus its manifest description. The suggestion
+    // list (each row with a description subtitle) uses a uniform row height so
+    // the keyboard scroll-into-view math stays exact.
+    final String? commandDescription = _getConsoleCommandDescription(currentWord);
+    final bool showCommandFooter =
+        commandDescription != null && commandDescription.isNotEmpty;
+    final String commandName =
+        showCommandFooter ? _consoleCommandName(currentWord) : '';
     final double listHeight = suggestions.isEmpty
         ? 0.0
         : (suggestions.length * rowHeight).clamp(rowHeight, 300.0);
