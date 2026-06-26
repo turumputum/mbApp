@@ -5129,8 +5129,17 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
       final String modeValue = suggestion.substring(5); // Remove "mode=" prefix
       final String? description = _getModeDescriptionFromManifest(modeValue);
       return description ?? 'Mode from manifest modes array';
-    } else if (currentWord != null && (currentWord == 'crosslink' || currentWord.startsWith('crosslink='))) {
-      final String rawCrossLinkValue = currentWord == 'crosslink' ? '' : currentWord.substring(10); // Remove 'crosslink=' prefix
+    } else if (currentWord != null &&
+        (_normalizeWordForComparison(currentWord) == 'crosslink' ||
+            _normalizeWordForComparison(currentWord).startsWith('crosslink='))) {
+      // The editor allows spaces around "=" ("crosslink = in_2/..."); the
+      // suggestion builder normalises them away before matching, so we must do
+      // the same here. Without it the raw word keeps the space, the prefix
+      // check fails, and every item falls through to the generic
+      // "Topic/Value from manifest" fallback instead of its real description.
+      final String normalizedWord = _normalizeWordForComparison(currentWord);
+      final String rawCrossLinkValue =
+          normalizedWord == 'crosslink' ? '' : normalizedWord.substring(10); // Remove 'crosslink=' prefix
       // crosslink= holds comma-separated rules; the helper edits the last one,
       // so parse only the rule after the final comma (as the suggestion builder
       // does) — otherwise an earlier rule's "->" misreads the step.
