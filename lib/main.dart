@@ -6421,14 +6421,27 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
     });
   }
 
+  /// Summon or dismiss the command helper popup. Shared by Ctrl+Space and by a
+  /// tap on the hint bubble under the input, so both entry points toggle.
+  /// Focus is taken back explicitly: a tap on the bubble is a tap outside the
+  /// TextField, which unfocuses it, and the popup anchors to the input's box.
+  void _toggleConsoleSuggestions() {
+    _consoleAutocompleteTimer?.cancel();
+    if (_consoleSuggestionOverlay != null) {
+      _hideConsoleSuggestionOverlay();
+      return;
+    }
+    _consoleInputFocusNode.requestFocus();
+    _refreshConsoleSuggestions(_consoleInputController.text);
+  }
+
   /// Handle keyboard events for console input suggestions
   KeyEventResult _handleConsoleKeyEvent(FocusNode node, KeyEvent event) {
     if (event is KeyDownEvent) {
       // Ctrl+Space - summon the command helper popup.
       if (event.logicalKey == LogicalKeyboardKey.space &&
           HardwareKeyboard.instance.isControlPressed) {
-        _consoleAutocompleteTimer?.cancel();
-        _refreshConsoleSuggestions(_consoleInputController.text);
+        _toggleConsoleSuggestions();
         return KeyEventResult.handled;
       }
 
@@ -6583,30 +6596,38 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
           ],
         ),
         const SizedBox(height: 6),
-        // Usage hint, styled like the config editor status bar.
+        // Usage hint, styled like the config editor status bar. Also a button:
+        // tapping it toggles the same helper popup as Ctrl+Space.
         Align(
           alignment: Alignment.centerLeft,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: Colors.blue[50],
+          child: Material(
+            color: Colors.blue[50],
+            borderRadius: BorderRadius.circular(8),
+            child: InkWell(
+              onTap: _toggleConsoleSuggestions,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.blue[200]!),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Icon(Icons.auto_awesome, size: 12, color: Colors.blue[600]),
-                const SizedBox(width: 6),
-                Text(
-                  'История команд: ↑ / ↓        Подсказки: Ctrl + Space',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.blue[700],
-                    fontWeight: FontWeight.w500,
-                  ),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue[200]!),
                 ),
-              ],
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Icon(Icons.auto_awesome, size: 12, color: Colors.blue[600]),
+                    const SizedBox(width: 6),
+                    Text(
+                      'История команд: ↑ / ↓        Подсказки: Ctrl + Space',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.blue[700],
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         ),
