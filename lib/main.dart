@@ -2944,8 +2944,10 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
   }
 
   static bool _isValidEnglish(String s) {
-    // Allow letters, digits, spaces, punctuation common in names (including /); but ensure letters present
-    final RegExp allowed = RegExp(r'^[A-Za-z0-9 _:\-\.\(\)/]+$');
+    // Allow letters, digits, spaces and punctuation common in device names.
+    // '[' and ']' stay excluded on purpose: they reject leftovers of ANSI colour
+    // escapes in firmware debug lines (e.g. "... [0m") that _safeAscii turns into text.
+    final RegExp allowed = RegExp(r"^[A-Za-z0-9 _:\-\.\(\)/+@#&%!?*=,~']+$");
     return s.isNotEmpty && allowed.hasMatch(s);
   }
 
